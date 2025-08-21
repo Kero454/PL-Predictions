@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Premier League Predictions</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Navigation -->
+        <nav class="navbar">
+            <div class="nav-container">
+                <div class="nav-brand">
+                    <i class="fas fa-futbol"></i>
+                    <span>PL Predictions</span>
+                </div>
+                <div class="nav-menu" id="navMenu">
+                    <a href="#" class="nav-link" onclick="showSection('matches')">Matches</a>
+                    <a href="#" class="nav-link" onclick="showSection('predictions')">My Predictions</a>
+                    <a href="#" class="nav-link" onclick="showSection('leaderboard')">Leaderboard</a>
+                    <button class="btn btn-outline" onclick="logout()">Logout</button>
+                </div>
+                <div class="hamburger" onclick="toggleMenu()">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Auth Section -->
+        <div id="authSection" class="auth-section">
+            <div class="auth-container">
+                <div class="auth-card">
+                    <div class="auth-header">
+                        <i class="fas fa-futbol"></i>
+                        <h1>Premier League Predictions</h1>
+                        <p>Compete with your friends in predicting match results!</p>
+                    </div>
+                    
+                    <div class="auth-tabs">
+                        <button class="tab-btn active" onclick="switchTab('login')">Login</button>
+                        <button class="tab-btn" onclick="switchTab('register')">Register</button>
+                    </div>
+
+                    <!-- Login Form -->
+                    <form id="loginForm" class="auth-form">
+                        <div class="form-group">
+                            <label for="loginUsername">Username</label>
+                            <input type="text" id="loginUsername" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="loginPassword">Password</label>
+                            <div class="password-input-container">
+                                <input type="password" id="loginPassword" required>
+                                <button type="button" class="password-toggle" onclick="togglePassword('loginPassword')">
+                                    <i class="fas fa-eye" id="loginPasswordToggle"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Login</button>
+                    </form>
+
+                    <!-- Register Form -->
+                    <form id="registerForm" class="auth-form" style="display: none;">
+                        <div class="form-group">
+                            <label for="registerUsername">Username</label>
+                            <input type="text" id="registerUsername" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="registerPassword">Password</label>
+                            <div class="password-input-container">
+                                <input type="password" id="registerPassword" required>
+                                <button type="button" class="password-toggle" onclick="togglePassword('registerPassword')">
+                                    <i class="fas fa-eye" id="registerPasswordToggle"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Register</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main App Section -->
+        <div id="mainApp" class="main-app" style="display: none;">
+            <!-- Welcome Header -->
+            <div class="welcome-header">
+                <h2>Welcome, <span id="usernameDisplay"></span>!</h2>
+                <div class="user-stats">
+                    <div class="stat">
+                        <i class="fas fa-trophy"></i>
+                        <span>Score: <span id="userScore">0</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Matches Section -->
+            <div id="matchesSection" class="section active">
+                <div class="section-header">
+                    <h3><i class="fas fa-calendar-alt"></i> Gameweek <span id="currentGameweek">1</span> Matches</h3>
+                    <div class="header-controls">
+                        <select id="gameweekSelector" class="gameweek-selector" onchange="changeGameweek()">
+                            <!-- Options will be populated by JavaScript -->
+                        </select>
+                        <button class="btn btn-secondary" onclick="loadMatches()">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+                <div class="gameweek-info">
+                    <div class="deadline-info" id="deadlineInfo">
+                        <i class="fas fa-clock"></i>
+                        <span id="deadlineText">Loading deadline...</span>
+                    </div>
+                    <p><i class="fas fa-star"></i> Remember to choose your <strong>doubler match</strong> for this gameweek!</p>
+                </div>
+                <div id="matchesContainer" class="matches-list">
+                    <!-- Matches will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Predictions Section -->
+            <div id="predictionsSection" class="section">
+                <div class="section-header">
+                    <h3><i class="fas fa-crystal-ball"></i> My Predictions</h3>
+                </div>
+                <div id="predictionsList" class="predictions-list">
+                    <!-- Predictions will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Leaderboard Section -->
+            <div id="leaderboardSection" class="section">
+                <div class="section-header">
+                    <h3><i class="fas fa-trophy"></i> Leaderboard</h3>
+                </div>
+                <div id="leaderboardList" class="leaderboard-list">
+                    <!-- Leaderboard will be loaded here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Prediction Modal -->
+        <div id="predictionModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h4>Make Your Prediction</h4>
+                    <span class="close" onclick="closePredictionModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="match-info">
+                        <div class="teams">
+                            <span id="modalHomeTeam"></span>
+                            <span class="vs">VS</span>
+                            <span id="modalAwayTeam"></span>
+                        </div>
+                        <div class="match-date" id="modalMatchDate"></div>
+                    </div>
+                    <form id="predictionForm">
+                        <div class="score-inputs">
+                            <div class="score-group">
+                                <label id="homeTeamLabel"></label>
+                                <input type="number" id="homeScore" min="0" max="20" required>
+                            </div>
+                            <div class="score-separator">-</div>
+                            <div class="score-group">
+                                <label id="awayTeamLabel"></label>
+                                <input type="number" id="awayScore" min="0" max="20" required>
+                            </div>
+                        </div>
+                        <div class="doubler-section">
+                            <label class="doubler-checkbox">
+                                <input type="checkbox" id="doublerCheckbox">
+                                <span class="checkmark"></span>
+                                <span class="doubler-text">
+                                    <strong>Double Points!</strong> 
+                                    <small>Choose one match per gameweek to double your points</small>
+                                </span>
+                            </label>
+                        </div>
+                        <div class="deadline-warning" id="modalDeadlineWarning" style="display: none;">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <span>Deadline has passed! You cannot make predictions for this gameweek.</span>
+                        </div>
+                        <div class="points-breakdown">
+                            <h5>Scoring System (max 4 points per match):</h5>
+                            <ul>
+                                <li>Correct home score: <strong>1 point</strong></li>
+                                <li>Correct away score: <strong>1 point</strong></li>
+                                <li>Correct goal difference: <strong>1 point</strong></li>
+                                <li>Correct result (win/draw/loss): <strong>1 point</strong></li>
+                            </ul>
+                            <p class="doubler-info">💡 Double points if this is your gameweek doubler!</p>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Submit Prediction</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Panel for Testing -->
+    <button class="admin-toggle" onclick="toggleAdminPanel()" title="Admin Panel">
+        <i class="fas fa-cog"></i>
+    </button>
+    
+    <div id="adminPanel" class="admin-panel">
+        <h4>Admin Panel (Testing)</h4>
+        <form onsubmit="updateMatchResult(event)">
+            <div class="form-group">
+                <label>Match ID:</label>
+                <input type="number" id="adminMatchId" min="1" max="10" required>
+            </div>
+            <div class="form-group">
+                <label>Home Score:</label>
+                <input type="number" id="adminHomeScore" min="0" max="20" required>
+            </div>
+            <div class="form-group">
+                <label>Away Score:</label>
+                <input type="number" id="adminAwayScore" min="0" max="20" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Update Result</button>
+        </form>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
