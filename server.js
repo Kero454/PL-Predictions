@@ -22,6 +22,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
+// Health check endpoint for Railway
+app.get('/', (req, res) => {
+  res.status(200).send('OK - Premier League Predictions App is running!');
+});
+
 // Database storage initialized
 // Users, predictions, and doublers now stored in SQLite database
 
@@ -510,6 +515,8 @@ db.initDatabase()
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Environment: ${process.env.NODE_ENV}`);
+      console.log(`Binding to 0.0.0.0:${PORT}`);
+      console.log(`Health check endpoint available at /`);
       console.log(`Server ready for connections`);
     });
   })
