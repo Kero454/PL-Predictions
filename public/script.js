@@ -10,9 +10,68 @@ let canPredict = true;
 // Cache DOM elements for better performance
 const domCache = {};
 
-// Function to get team logo (now uses SVG from team-logos.js)
+// Function to get team logo with fallback
 function getTeamLogo(teamName) {
-    return getTeamLogoHTML(teamName);
+    // Check if team-logos.js is loaded
+    if (typeof getTeamLogoHTML === 'function') {
+        return getTeamLogoHTML(teamName);
+    }
+    
+    // Fallback to simple colored circles with team abbreviations
+    const teamColors = {
+        'Arsenal': '#DC143C',
+        'Aston Villa': '#95BFE5', 
+        'Bournemouth': '#DA020E',
+        'Brentford': '#E30613',
+        'Brighton': '#0057B8',
+        'Chelsea': '#034694',
+        'Crystal Palace': '#1B458F',
+        'Everton': '#003399',
+        'Fulham': '#000000',
+        'Ipswich Town': '#4169E1',
+        'Leicester City': '#003090',
+        'Liverpool': '#C8102E',
+        'Manchester City': '#6CABDD',
+        'Manchester United': '#DA020E',
+        'Newcastle United': '#241F20',
+        'Nottingham Forest': '#DD0000',
+        'Southampton': '#D71920',
+        'Tottenham': '#132257',
+        'West Ham': '#7A263A',
+        'Wolverhampton': '#FDB462'
+    };
+    
+    const teamAbbr = {
+        'Arsenal': 'ARS',
+        'Aston Villa': 'AVL',
+        'Bournemouth': 'BOU', 
+        'Brentford': 'BRE',
+        'Brighton': 'BHA',
+        'Chelsea': 'CHE',
+        'Crystal Palace': 'CRY',
+        'Everton': 'EVE',
+        'Fulham': 'FUL',
+        'Ipswich Town': 'IPS',
+        'Leicester City': 'LEI',
+        'Liverpool': 'LIV',
+        'Manchester City': 'MCI',
+        'Manchester United': 'MUN',
+        'Newcastle United': 'NEW',
+        'Nottingham Forest': 'NFO',
+        'Southampton': 'SOU',
+        'Tottenham': 'TOT',
+        'West Ham': 'WHU',
+        'Wolverhampton': 'WOL'
+    };
+    
+    const color = teamColors[teamName] || '#666666';
+    const abbr = teamAbbr[teamName] || 'FC';
+    const textColor = (teamName === 'Wolverhampton') ? 'black' : 'white';
+    
+    return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="10" fill="${color}"/>
+        <text x="12" y="16" text-anchor="middle" fill="${textColor}" font-size="9" font-weight="bold">${abbr}</text>
+    </svg>`;
 }
 
 // Initialize the app
