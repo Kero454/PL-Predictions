@@ -507,11 +507,21 @@ const PORT = process.env.PORT || 3000;
 db.initDatabase()
   .then(() => {
     console.log('Database initialized successfully');
-    server.listen(PORT, () => {
+    server.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on port ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV}`);
+      console.log(`Server ready for connections`);
     });
   })
   .catch(error => {
     console.error('Database initialization failed:', error);
     process.exit(1);
   });
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    console.log('Process terminated');
+  });
+});
