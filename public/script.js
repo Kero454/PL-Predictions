@@ -10,33 +10,9 @@ let canPredict = true;
 // Cache DOM elements for better performance
 const domCache = {};
 
-// Premier League team logos mapping (using emoji fallbacks)
-const teamLogos = {
-    'Arsenal': '🔴',
-    'Aston Villa': '🟣',
-    'Bournemouth': '🔴',
-    'Brentford': '🔴',
-    'Brighton': '🔵',
-    'Chelsea': '🔵',
-    'Crystal Palace': '🔴',
-    'Everton': '🔵',
-    'Fulham': '⚪',
-    'Ipswich Town': '🔵',
-    'Leicester City': '🔵',
-    'Liverpool': '🔴',
-    'Manchester City': '🔵',
-    'Manchester United': '🔴',
-    'Newcastle United': '⚫',
-    'Nottingham Forest': '🔴',
-    'Southampton': '🔴',
-    'Tottenham': '⚪',
-    'West Ham': '🟤',
-    'Wolverhampton': '🟠'
-};
-
-// Function to get team logo
+// Function to get team logo (now uses SVG from team-logos.js)
 function getTeamLogo(teamName) {
-    return teamLogos[teamName] || '⚽';
+    return getTeamLogoHTML(teamName);
 }
 
 // Initialize the app
@@ -888,43 +864,17 @@ function togglePassword(inputId) {
 async function loadGameweeks() {
     try {
         const selector = domCache.gameweekSelector || document.getElementById('gameweekSelector');
-        if (!selector) return;
+        if (!selector) {
+            console.error('Gameweek selector not found');
+            return;
+        }
+        
+        console.log('Loading gameweeks into selector');
         
         // Clear existing options
         selector.innerHTML = '';
         
-        // Get all matches to determine gameweek status
-        const allMatches = await fetch('/api/matches').then(r => r.json());
-        
-        // Add gameweeks 1-38 with status
-        for (let i = 1; i <= 38; i++) {
-            const gameweekMatches = allMatches.filter(m => m.gameweek === i);
-            let status = '';
-            
-            if (gameweekMatches.length > 0) {
-                const finished = gameweekMatches.filter(m => m.status === 'finished').length;
-                const live = gameweekMatches.filter(m => m.status === 'live').length;
-                
-                if (finished === gameweekMatches.length) {
-                    status = ' ✅'; // All finished
-                } else if (live > 0) {
-                    status = ' 🔴'; // Live matches
-                } else {
-                    status = ' ⏳'; // Upcoming
-                }
-            }
-            
-            const option = document.createElement('option');
-            option.value = i;
-            option.textContent = `Gameweek ${i}${status}`;
-            if (i === currentGameweek) {
-                option.selected = true;
-            }
-            selector.appendChild(option);
-        }
-    } catch (error) {
-        console.error('Failed to load gameweeks:', error);
-        // Fallback to simple gameweeks
+        // Simple fallback first - just add all gameweeks
         for (let i = 1; i <= 38; i++) {
             const option = document.createElement('option');
             option.value = i;
@@ -934,6 +884,45 @@ async function loadGameweeks() {
             }
             selector.appendChild(option);
         }
+        
+        console.log('Added', selector.children.length, 'gameweek options');
+        
+        // Try to add status indicators
+        try {
+            const response = await fetch('/api/matches');
+            if (response.ok) {
+                const allMatches = await response.json();
+                
+                // Update options with status
+                for (let i = 1; i <= 38; i++) {
+                    const gameweekMatches = allMatches.filter(m => m.gameweek === i);
+                    let status = '';
+                    
+                    if (gameweekMatches.length > 0) {
+                        const finished = gameweekMatches.filter(m => m.status === 'finished').length;
+                        const live = gameweekMatches.filter(m => m.status === 'live').length;
+                        
+                        if (finished === gameweekMatches.length) {
+                            status = ' ✅';
+                        } else if (live > 0) {
+                            status = ' 🔴';
+                        } else {
+                            status = ' ⏳';
+                        }
+                    }
+                    
+                    const option = selector.children[i - 1];
+                    if (option) {
+                        option.textContent = `Gameweek ${i}${status}`;
+                    }
+                }
+            }
+        } catch (statusError) {
+            console.log('Could not load match status, using simple gameweeks');
+        }
+        
+    } catch (error) {
+        console.error('Failed to load gameweeks:', error);
     }
 }
 

@@ -983,18 +983,22 @@ body {
 .team {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     justify-content: center;
+    flex-wrap: wrap;
 }
 
 .team-logo {
-    font-size: 20px;
-    margin-right: 8px;
     display: inline-block;
+    vertical-align: middle;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
 }
 
 .team-name {
     font-weight: 600;
+    font-size: 14px;
 }
 
 /* Match teams container */
@@ -1002,14 +1006,42 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin: 1rem 0;
-    padding: 0 1rem;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
-.match-teams .vs {
+.vs {
     font-weight: bold;
-    color: #667eea;
-    font-size: 0.9rem;
+    color: #666;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+/* Mobile responsiveness for match teams */
+@media (max-width: 480px) {
+    .match-teams {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .team {
+        justify-content: center;
+        gap: 4px;
+    }
+    
+    .team-logo {
+        width: 18px;
+        height: 18px;
+    }
+    
+    .team-name {
+        font-size: 13px;
+    }
+    
+    .vs {
+        font-size: 11px;
+        margin: 2px 0;
+    }
 }
 
 /* Responsive team logos */
