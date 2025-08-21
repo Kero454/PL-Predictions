@@ -22,9 +22,19 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Health check endpoint for Railway
+// Health check endpoint for Railway - optimized for speed
 app.get('/', (req, res) => {
-  res.status(200).send('OK - Premier League Predictions App is running!');
+  res.status(200).end('OK');
+});
+
+// Add readiness probe endpoint
+let dbReady = false;
+app.get('/ready', (req, res) => {
+  if (dbReady) {
+    res.status(200).end('READY');
+  } else {
+    res.status(503).end('NOT_READY');
+  }
 });
 
 // Database storage initialized
@@ -508,22 +518,24 @@ const updateMatchResults = (matchId, homeScore, awayScore) => {
 
 const PORT = process.env.PORT || 3000;
 
-// Initialize database and start server
-db.initDatabase()
-  .then(() => {
-    console.log('Database initialized successfully');
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running on port ${PORT}`);
-      console.log(`Environment: ${process.env.NODE_ENV}`);
-      console.log(`Binding to 0.0.0.0:${PORT}`);
-      console.log(`Health check endpoint available at /`);
-      console.log(`Server ready for connections`);
+// Start server immediately for healthcheck, initialize DB in background
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Health check endpoint ready at /`);
+  
+  // Initialize database in background after server starts
+  db.initDatabase()
+    .then(() => {
+      dbReady = true;
+      console.log('Database initialized successfully');
+      console.log(`Full app ready for connections`);
+    })
+    .catch(error => {
+      console.error('Database initialization failed:', error);
+      dbReady = false;
+      // Don't exit - healthcheck can still pass
     });
-  })
-  .catch(error => {
-    console.error('Database initialization failed:', error);
-    process.exit(1);
-  });
+});
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
