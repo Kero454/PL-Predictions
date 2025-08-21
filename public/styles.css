@@ -988,10 +988,9 @@ body {
 }
 
 .team-logo {
-    width: 24px;
-    height: 24px;
-    object-fit: contain;
-    border-radius: 2px;
+    font-size: 20px;
+    margin-right: 8px;
+    display: inline-block;
 }
 
 .team-name {

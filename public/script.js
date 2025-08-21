@@ -10,33 +10,33 @@ let canPredict = true;
 // Cache DOM elements for better performance
 const domCache = {};
 
-// Premier League team logos mapping (using reliable CDN)
+// Premier League team logos mapping (using emoji fallbacks)
 const teamLogos = {
-    'Arsenal': 'https://resources.premierleague.com/premierleague/badges/50/t3.png',
-    'Aston Villa': 'https://resources.premierleague.com/premierleague/badges/50/t7.png',
-    'Bournemouth': 'https://resources.premierleague.com/premierleague/badges/50/t91.png',
-    'Brentford': 'https://resources.premierleague.com/premierleague/badges/50/t94.png',
-    'Brighton': 'https://resources.premierleague.com/premierleague/badges/50/t36.png',
-    'Chelsea': 'https://resources.premierleague.com/premierleague/badges/50/t8.png',
-    'Crystal Palace': 'https://resources.premierleague.com/premierleague/badges/50/t31.png',
-    'Everton': 'https://resources.premierleague.com/premierleague/badges/50/t11.png',
-    'Fulham': 'https://resources.premierleague.com/premierleague/badges/50/t54.png',
-    'Ipswich Town': 'https://resources.premierleague.com/premierleague/badges/50/t40.png',
-    'Leicester City': 'https://resources.premierleague.com/premierleague/badges/50/t13.png',
-    'Liverpool': 'https://resources.premierleague.com/premierleague/badges/50/t14.png',
-    'Manchester City': 'https://resources.premierleague.com/premierleague/badges/50/t43.png',
-    'Manchester United': 'https://resources.premierleague.com/premierleague/badges/50/t1.png',
-    'Newcastle United': 'https://resources.premierleague.com/premierleague/badges/50/t4.png',
-    'Nottingham Forest': 'https://resources.premierleague.com/premierleague/badges/50/t17.png',
-    'Southampton': 'https://resources.premierleague.com/premierleague/badges/50/t20.png',
-    'Tottenham': 'https://resources.premierleague.com/premierleague/badges/50/t6.png',
-    'West Ham': 'https://resources.premierleague.com/premierleague/badges/50/t21.png',
-    'Wolverhampton': 'https://resources.premierleague.com/premierleague/badges/50/t39.png'
+    'Arsenal': '🔴',
+    'Aston Villa': '🟣',
+    'Bournemouth': '🔴',
+    'Brentford': '🔴',
+    'Brighton': '🔵',
+    'Chelsea': '🔵',
+    'Crystal Palace': '🔴',
+    'Everton': '🔵',
+    'Fulham': '⚪',
+    'Ipswich Town': '🔵',
+    'Leicester City': '🔵',
+    'Liverpool': '🔴',
+    'Manchester City': '🔵',
+    'Manchester United': '🔴',
+    'Newcastle United': '⚫',
+    'Nottingham Forest': '🔴',
+    'Southampton': '🔴',
+    'Tottenham': '⚪',
+    'West Ham': '🟤',
+    'Wolverhampton': '🟠'
 };
 
 // Function to get team logo
 function getTeamLogo(teamName) {
-    return teamLogos[teamName] || 'https://via.placeholder.com/30x30?text=FC';
+    return teamLogos[teamName] || '⚽';
 }
 
 // Initialize the app
@@ -725,12 +725,12 @@ function createMatchCard(match) {
         </div>
         <div class="match-teams">
             <div class="team home-team">
-                <img src="${getTeamLogo(match.homeTeam)}" alt="${match.homeTeam}" class="team-logo">
+                <span class="team-logo">${getTeamLogo(match.homeTeam)}</span>
                 <span class="team-name">${match.homeTeam}</span>
             </div>
             <div class="vs">VS</div>
             <div class="team away-team">
-                <img src="${getTeamLogo(match.awayTeam)}" alt="${match.awayTeam}" class="team-logo">
+                <span class="team-logo">${getTeamLogo(match.awayTeam)}</span>
                 <span class="team-name">${match.awayTeam}</span>
             </div>
         </div>
@@ -884,7 +884,7 @@ function togglePassword(inputId) {
     }
 }
 
-// Load gameweeks into selector
+// Load gameweeks into selector with status indicators
 async function loadGameweeks() {
     try {
         const selector = domCache.gameweekSelector || document.getElementById('gameweekSelector');
@@ -893,7 +893,38 @@ async function loadGameweeks() {
         // Clear existing options
         selector.innerHTML = '';
         
-        // Add gameweeks 1-38
+        // Get all matches to determine gameweek status
+        const allMatches = await fetch('/api/matches').then(r => r.json());
+        
+        // Add gameweeks 1-38 with status
+        for (let i = 1; i <= 38; i++) {
+            const gameweekMatches = allMatches.filter(m => m.gameweek === i);
+            let status = '';
+            
+            if (gameweekMatches.length > 0) {
+                const finished = gameweekMatches.filter(m => m.status === 'finished').length;
+                const live = gameweekMatches.filter(m => m.status === 'live').length;
+                
+                if (finished === gameweekMatches.length) {
+                    status = ' ✅'; // All finished
+                } else if (live > 0) {
+                    status = ' 🔴'; // Live matches
+                } else {
+                    status = ' ⏳'; // Upcoming
+                }
+            }
+            
+            const option = document.createElement('option');
+            option.value = i;
+            option.textContent = `Gameweek ${i}${status}`;
+            if (i === currentGameweek) {
+                option.selected = true;
+            }
+            selector.appendChild(option);
+        }
+    } catch (error) {
+        console.error('Failed to load gameweeks:', error);
+        // Fallback to simple gameweeks
         for (let i = 1; i <= 38; i++) {
             const option = document.createElement('option');
             option.value = i;
@@ -903,8 +934,6 @@ async function loadGameweeks() {
             }
             selector.appendChild(option);
         }
-    } catch (error) {
-        console.error('Failed to load gameweeks:', error);
     }
 }
 
