@@ -1009,6 +1009,9 @@ async function loadGameweeks() {
             console.log('Auto-detected gameweek:', currentGameweek);
         }
 
+        // Safety guard: never leave currentGameweek null
+        if (!currentGameweek) currentGameweek = 1;
+
         // Clear and populate hidden select
         selector.innerHTML = '';
         for (let i = 1; i <= 38; i++) {
@@ -1045,7 +1048,7 @@ async function loadGameweeks() {
                 else if (liveCount > 0) gameweekStatuses[i] = 'live';
             }
         }
-        renderGameweekPills(gameweekStatuses);
+        setTimeout(() => renderGameweekPills(gameweekStatuses), 100);
         
     } catch (error) {
         console.error('Failed to load gameweeks:', error);
