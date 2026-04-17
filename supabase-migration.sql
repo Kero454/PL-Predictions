@@ -138,3 +138,17 @@ CREATE INDEX IF NOT EXISTS idx_league_members_user ON league_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_h2h_challenger ON h2h_challenges(challenger_id);
 CREATE INDEX IF NOT EXISTS idx_h2h_opponent ON h2h_challenges(opponent_id);
+
+-- Enable RLS on all tables (service_role key bypasses RLS automatically)
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE predictions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE doublers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leagues ENABLE ROW LEVEL SECURITY;
+ALTER TABLE league_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_badges ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_streaks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE weekly_winners ENABLE ROW LEVEL SECURITY;
+ALTER TABLE h2h_challenges ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
