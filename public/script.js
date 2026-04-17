@@ -1618,7 +1618,7 @@ showMainApp = function() {
         if (usernameDisplay) usernameDisplay.textContent = currentUser.username;
     }
 
-    if (!socket) {
+    if (!socket && typeof io !== 'undefined') {
         socket = io();
         socket.on('leaderboardUpdate', loadLeaderboard);
         // Listen for real-time notifications
