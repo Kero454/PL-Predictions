@@ -3,6 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="description" content="Premier League Match Predictions - Compete with friends!">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="PL Predict">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg">
     <title>Premier League Predictions</title>
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -10,24 +17,36 @@
 </head>
 <body>
     <div class="app">
-        <!-- Navigation -->
-        <nav class="navbar">
+        <!-- Navigation - hidden until logged in -->
+        <nav class="navbar" id="mainNavbar" style="display: none;">
             <div class="nav-container">
                 <div class="nav-brand">
-                    <i class="fas fa-futbol"></i>
+                    <div class="nav-logo" id="navLogoIcon"></div>
                     <span>PL Predictions</span>
                 </div>
-                <div class="nav-menu" id="navMenu">
-                    <a href="#" class="nav-link" onclick="showSection('matches')">Matches</a>
-                    <a href="#" class="nav-link" onclick="showSection('predictions')">My Predictions</a>
-                    <a href="#" class="nav-link" onclick="showSection('leaderboard')">Leaderboard</a>
-                    <button class="btn btn-outline" onclick="logout()">Logout</button>
+                <div class="nav-right">
+                    <a href="#" class="nav-icon-link notif-link" onclick="showSection('notifications')" title="Notifications">
+                        <i class="fas fa-bell"></i>
+                        <span id="notifBadge" class="notif-badge" style="display:none;">0</span>
+                    </a>
+                    <a href="#" class="nav-icon-link" onclick="showSection('profile')" title="Profile">
+                        <i class="fas fa-user-circle"></i>
+                    </a>
+                    <button class="nav-logout-btn" onclick="logout()" title="Logout">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
                 </div>
-                <div class="hamburger" onclick="toggleMenu()">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </div>
+            </div>
+            <div class="nav-tabs" id="navMenu">
+                <a href="#" class="nav-tab active" onclick="showSection('matches')" data-section="matches"><i class="fas fa-futbol"></i><span>Matches</span></a>
+                <a href="#" class="nav-tab" onclick="showSection('predictions')" data-section="predictions"><i class="fas fa-list-check"></i><span>Predictions</span></a>
+                <a href="#" class="nav-tab" onclick="showSection('leaderboard')" data-section="leaderboard"><i class="fas fa-ranking-star"></i><span>Leaderboard</span></a>
+                <a href="#" class="nav-tab" onclick="showSection('leagues')" data-section="leagues"><i class="fas fa-users"></i><span>Leagues</span></a>
+                <a href="#" class="nav-tab" onclick="showSection('h2h')" data-section="h2h"><i class="fas fa-people-arrows"></i><span>H2H</span></a>
+                <a href="#" class="nav-tab" onclick="showSection('reveal')" data-section="reveal"><i class="fas fa-eye"></i><span>Reveals</span></a>
+                <a href="#" class="nav-tab" onclick="showSection('achievements')" data-section="achievements"><i class="fas fa-trophy"></i><span>Achievements</span></a>
+                <a href="#" class="nav-tab" onclick="showSection('seasonStats')" data-section="seasonStats"><i class="fas fa-chart-line"></i><span>Stats</span></a>
+                <a href="#" class="nav-tab pro-tab" onclick="showSection('pro')" data-section="pro"><i class="fas fa-crown"></i><span>Pro</span></a>
             </div>
         </nav>
 
@@ -36,8 +55,8 @@
             <div class="auth-container">
                 <div class="auth-card">
                     <div class="auth-header">
-                        <i class="fas fa-futbol"></i>
-                        <h1>Premier League Predictions</h1>
+                        <img src="/icons/icon-192.svg" alt="PL Predictions" class="auth-logo-img" width="80" height="80">
+                        <h1>PL Predictions</h1>
                         <p>Compete with your friends in predicting match results!</p>
                     </div>
                     
@@ -68,19 +87,56 @@
                     <form id="registerForm" class="auth-form" style="display: none;">
                         <div class="form-group">
                             <label for="registerUsername">Username</label>
-                            <input type="text" id="registerUsername" required>
+                            <input type="text" id="registerUsername" required minlength="3" maxlength="20" placeholder="Min 3 characters">
                         </div>
                         <div class="form-group">
                             <label for="registerPassword">Password</label>
                             <div class="password-input-container">
-                                <input type="password" id="registerPassword" required>
+                                <input type="password" id="registerPassword" required minlength="8" placeholder="Min 8 characters" oninput="checkPasswordStrength()">
                                 <button type="button" class="password-toggle" onclick="togglePassword('registerPassword')">
                                     <i class="fas fa-eye" id="registerPasswordToggle"></i>
                                 </button>
                             </div>
+                            <div class="password-strength" id="passwordStrength">
+                                <div class="strength-bar" id="strengthBar"></div>
+                            </div>
+                            <div class="password-rules" id="passwordRules">
+                                <div class="rule" id="ruleLength"><i class="fas fa-circle"></i> At least 8 characters</div>
+                                <div class="rule" id="ruleUpper"><i class="fas fa-circle"></i> One uppercase letter</div>
+                                <div class="rule" id="ruleLower"><i class="fas fa-circle"></i> One lowercase letter</div>
+                                <div class="rule" id="ruleNumber"><i class="fas fa-circle"></i> One number</div>
+                                <div class="rule" id="ruleSpecial"><i class="fas fa-circle"></i> One special character (!@#$%...)</div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="registerConfirmPassword">Confirm Password</label>
+                            <div class="password-input-container">
+                                <input type="password" id="registerConfirmPassword" required placeholder="Repeat your password" oninput="checkPasswordMatch()">
+                                <button type="button" class="password-toggle" onclick="togglePassword('registerConfirmPassword')">
+                                    <i class="fas fa-eye" id="registerConfirmPasswordToggle"></i>
+                                </button>
+                            </div>
+                            <div class="password-match" id="passwordMatch"></div>
                         </div>
                         <button type="submit" class="btn btn-primary">Register</button>
                     </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- PWA Install Banner -->
+        <div id="installBanner" class="install-banner" style="display: none;">
+            <div class="install-content">
+                <div class="install-icon">
+                    <i class="fas fa-mobile-alt"></i>
+                </div>
+                <div class="install-text">
+                    <strong>Install PL Predictions</strong>
+                    <span>Add to your home screen for the best experience!</span>
+                </div>
+                <div class="install-actions">
+                    <button class="btn btn-primary btn-sm" id="installBtn" onclick="installPWA()">Install</button>
+                    <button class="btn btn-ghost btn-sm" onclick="dismissInstallBanner()"><i class="fas fa-times"></i></button>
                 </div>
             </div>
         </div>
@@ -95,6 +151,23 @@
                         <i class="fas fa-trophy"></i>
                         <span>Score: <span id="userScore">0</span></span>
                     </div>
+                    <div class="stat">
+                        <i class="fas fa-fire"></i>
+                        <span>Streak: <span id="userStreak">0</span></span>
+                    </div>
+                    <div class="stat">
+                        <i class="fas fa-ranking-star"></i>
+                        <span>Rank: #<span id="userRank">-</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Weekly Winner Banner -->
+            <div id="weeklyWinnerBanner" class="weekly-winner-banner" style="display: none;">
+                <div class="winner-content">
+                    <i class="fas fa-crown"></i>
+                    <span>GW<span id="winnerGameweek"></span> Champion: <strong id="winnerName"></strong> with <span id="winnerScore"></span> points!</span>
+                    <i class="fas fa-crown"></i>
                 </div>
             </div>
 
@@ -103,14 +176,21 @@
                 <div class="section-header">
                     <h3><i class="fas fa-calendar-alt"></i> Gameweek <span id="currentGameweek">1</span> Matches</h3>
                     <div class="header-controls">
-                        <select id="gameweekSelector" class="gameweek-selector" onchange="changeGameweek()">
-                            <!-- Options will be populated by JavaScript -->
-                        </select>
-                        <button class="btn btn-secondary" onclick="loadMatches()">
-                            <i class="fas fa-sync-alt"></i> Refresh
+                        <button class="btn btn-secondary btn-sm" onclick="loadMatches()">
+                            <i class="fas fa-sync-alt"></i>
                         </button>
                     </div>
                 </div>
+                <!-- Horizontal scrollable gameweek selector -->
+                <div class="gameweek-pills-wrapper">
+                    <button class="gw-scroll-btn gw-scroll-left" onclick="scrollGameweeks(-1)"><i class="fas fa-chevron-left"></i></button>
+                    <div class="gameweek-pills" id="gameweekPills">
+                        <!-- Pills populated by JS -->
+                    </div>
+                    <button class="gw-scroll-btn gw-scroll-right" onclick="scrollGameweeks(1)"><i class="fas fa-chevron-right"></i></button>
+                </div>
+                <!-- Hidden select for backward compatibility -->
+                <select id="gameweekSelector" style="display:none" onchange="changeGameweek()"></select>
                 <div class="gameweek-info">
                     <div class="deadline-info" id="deadlineInfo">
                         <i class="fas fa-clock"></i>
@@ -140,6 +220,198 @@
                 </div>
                 <div id="leaderboardList" class="leaderboard-list">
                     <!-- Leaderboard will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Leagues Section -->
+            <div id="leaguesSection" class="section">
+                <div class="section-header">
+                    <h3><i class="fas fa-users"></i> My Leagues</h3>
+                    <div class="header-controls">
+                        <button class="btn btn-primary" onclick="openCreateLeagueModal()"><i class="fas fa-plus"></i> Create</button>
+                        <button class="btn btn-secondary" onclick="openJoinLeagueModal()"><i class="fas fa-sign-in-alt"></i> Join</button>
+                    </div>
+                </div>
+                <div id="leaguesList" class="leagues-list">
+                    <!-- Leagues will be loaded here -->
+                </div>
+
+                <!-- League Leaderboard (shown when a league is selected) -->
+                <div id="leagueLeaderboardView" style="display: none;">
+                    <div class="section-header">
+                        <h3><i class="fas fa-trophy"></i> <span id="leagueNameTitle"></span></h3>
+                        <div class="header-controls">
+                            <button class="btn btn-secondary" onclick="backToLeaguesList()"><i class="fas fa-arrow-left"></i> Back</button>
+                            <button class="btn btn-outline" onclick="copyInviteCode()" id="copyCodeBtn"><i class="fas fa-copy"></i> <span id="leagueInviteDisplay"></span></button>
+                        </div>
+                    </div>
+                    <div id="leagueLeaderboardList" class="leaderboard-list">
+                        <!-- League leaderboard here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- H2H Section -->
+            <div id="h2hSection" class="section">
+                <div class="section-header">
+                    <h3><i class="fas fa-people-arrows"></i> Head-to-Head</h3>
+                    <div class="header-controls">
+                        <button class="btn btn-primary" onclick="openH2HChallengeModal()"><i class="fas fa-plus"></i> Challenge</button>
+                    </div>
+                </div>
+                <!-- Pending Challenges -->
+                <div id="h2hPending" class="h2h-section-group"></div>
+                <!-- Active / Completed Challenges -->
+                <div id="h2hList" class="h2h-list"></div>
+            </div>
+
+            <!-- Prediction Reveal Section -->
+            <div id="revealSection" class="section">
+                <div class="section-header">
+                    <h3><i class="fas fa-eye"></i> Prediction Reveals</h3>
+                    <div class="header-controls">
+                        <select id="revealGwSelector" class="gameweek-selector" onchange="loadPredictionReveal()">
+                        </select>
+                    </div>
+                </div>
+                <div id="revealContent" class="reveal-content">
+                    <div class="empty-state">
+                        <i class="fas fa-eye-slash"></i>
+                        <p>Select a gameweek to see everyone's predictions (available after deadline)</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Achievements Section -->
+            <div id="achievementsSection" class="section">
+                <div class="section-header">
+                    <h3><i class="fas fa-trophy"></i> Achievements</h3>
+                </div>
+                <div id="achievementsSummary" class="achievements-summary"></div>
+                <div id="achievementsGrid" class="achievements-grid"></div>
+            </div>
+
+            <!-- Season Stats Section -->
+            <div id="seasonStatsSection" class="section">
+                <div class="section-header">
+                    <h3><i class="fas fa-chart-line"></i> Season Stats</h3>
+                </div>
+                <div id="seasonStatsGrid" class="profile-stats-grid"></div>
+                <div class="stats-chart-section">
+                    <h4 style="color:white; margin-bottom:1rem;"><i class="fas fa-chart-bar"></i> Points Per Gameweek</h4>
+                    <div id="gwChart" class="gw-chart"></div>
+                </div>
+            </div>
+
+            <!-- Notifications Section -->
+            <div id="notificationsSection" class="section">
+                <div class="section-header">
+                    <h3><i class="fas fa-bell"></i> Notifications</h3>
+                    <div class="header-controls">
+                        <button class="btn btn-secondary" onclick="markAllNotificationsRead()"><i class="fas fa-check-double"></i> Mark All Read</button>
+                    </div>
+                </div>
+                <div id="notificationsList" class="notifications-list"></div>
+            </div>
+
+            <!-- Pro Subscription Section -->
+            <div id="proSection" class="section">
+                <div class="section-header">
+                    <h3><i class="fas fa-crown"></i> PL Predictions Pro</h3>
+                </div>
+                <div class="pro-hero">
+                    <div class="pro-badge-large">
+                        <i class="fas fa-crown"></i>
+                    </div>
+                    <h2>Upgrade to Pro</h2>
+                    <p class="pro-price">$3<span>/month</span></p>
+                    <p class="pro-tagline">Unlock exclusive features and dominate the leaderboard!</p>
+                </div>
+                <div class="pro-features-grid">
+                    <div class="pro-feature-card">
+                        <i class="fas fa-chart-line"></i>
+                        <h4>Advanced Analytics</h4>
+                        <p>Detailed prediction accuracy breakdowns, trends, and insights</p>
+                    </div>
+                    <div class="pro-feature-card">
+                        <i class="fas fa-infinity"></i>
+                        <h4>Unlimited H2H</h4>
+                        <p>Challenge unlimited players (free: 3 per week)</p>
+                    </div>
+                    <div class="pro-feature-card">
+                        <i class="fas fa-star"></i>
+                        <h4>Double Doublers</h4>
+                        <p>Use 2 doublers per gameweek instead of 1</p>
+                    </div>
+                    <div class="pro-feature-card">
+                        <i class="fas fa-palette"></i>
+                        <h4>Custom Themes</h4>
+                        <p>Personalize your app with exclusive color themes</p>
+                    </div>
+                    <div class="pro-feature-card">
+                        <i class="fas fa-ad"></i>
+                        <h4>Ad-Free</h4>
+                        <p>Enjoy a clean, distraction-free experience</p>
+                    </div>
+                    <div class="pro-feature-card">
+                        <i class="fas fa-bolt"></i>
+                        <h4>Early Access</h4>
+                        <p>Get new features before everyone else</p>
+                    </div>
+                </div>
+                <div id="proStatus" class="pro-status">
+                    <!-- Filled by JS -->
+                </div>
+                <div class="pro-cta">
+                    <button class="btn btn-pro" id="proSubscribeBtn" onclick="subscribeToPro()"><i class="fas fa-crown"></i> Subscribe Now - $3/month</button>
+                    <p class="pro-note">Cancel anytime. Secure payment via Stripe.</p>
+                </div>
+            </div>
+
+            <!-- Profile Section -->
+            <div id="profileSection" class="section">
+                <div class="section-header">
+                    <h3><i class="fas fa-user"></i> My Profile</h3>
+                    <div class="header-controls">
+                        <button class="btn btn-primary" onclick="openShareCard()"><i class="fas fa-share-alt"></i> Share Card</button>
+                    </div>
+                </div>
+
+                <!-- Stats Grid -->
+                <div class="profile-stats-grid" id="profileStats">
+                    <!-- Filled by JS -->
+                </div>
+
+                <!-- Badges -->
+                <div class="badges-section">
+                    <h4><i class="fas fa-medal"></i> Badges & Achievements</h4>
+                    <div id="badgesGrid" class="badges-grid">
+                        <!-- Filled by JS -->
+                    </div>
+                </div>
+
+                <!-- Push Notifications -->
+                <div class="push-notif-section">
+                    <h4><i class="fas fa-bell"></i> Push Notifications</h4>
+                    <p style="color: rgba(255,255,255,0.6); font-size: 0.85rem; margin-bottom: 0.75rem;">
+                        Get notified about deadlines, results, and H2H challenges on your phone or laptop.
+                    </p>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <button class="btn btn-primary btn-sm" onclick="subscribeToPushNotifications().then(()=>showSuccess('Notifications enabled!'))">
+                            <i class="fas fa-bell"></i> Enable Notifications
+                        </button>
+                        <button class="btn btn-secondary btn-sm" onclick="testPushNotification()">
+                            <i class="fas fa-paper-plane"></i> Send Test
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Weekly Winners History -->
+                <div class="winners-history">
+                    <h4><i class="fas fa-crown"></i> Weekly Champions</h4>
+                    <div id="winnersHistory" class="winners-list">
+                        <!-- Filled by JS -->
+                    </div>
                 </div>
             </div>
         </div>
@@ -181,6 +453,7 @@
                                     <small>Choose one match per gameweek to double your points</small>
                                 </span>
                             </label>
+                            <div id="doublerHint" class="doubler-hint" style="display:none;"></div>
                         </div>
                         <div class="deadline-warning" id="modalDeadlineWarning" style="display: none;">
                             <i class="fas fa-exclamation-triangle"></i>
@@ -199,6 +472,97 @@
                         <button type="submit" class="btn btn-primary">Submit Prediction</button>
                     </form>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create League Modal -->
+    <div id="createLeagueModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h4><i class="fas fa-plus-circle"></i> Create League</h4>
+                <span class="close" onclick="closeModal('createLeagueModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="createLeagueForm" onsubmit="handleCreateLeague(event)">
+                    <div class="form-group">
+                        <label for="leagueName">League Name</label>
+                        <input type="text" id="leagueName" placeholder="e.g. Office League" required minlength="2" maxlength="40">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Create League</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Join League Modal -->
+    <div id="joinLeagueModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h4><i class="fas fa-sign-in-alt"></i> Join League</h4>
+                <span class="close" onclick="closeModal('joinLeagueModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="joinLeagueForm" onsubmit="handleJoinLeague(event)">
+                    <div class="form-group">
+                        <label for="inviteCode">Invite Code</label>
+                        <input type="text" id="inviteCode" placeholder="e.g. ABC123" required maxlength="6" style="text-transform: uppercase; letter-spacing: 4px; text-align: center; font-size: 1.4rem;">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Join League</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Card Modal -->
+    <div id="shareCardModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h4><i class="fas fa-share-alt"></i> Your Share Card</h4>
+                <span class="close" onclick="closeModal('shareCardModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="shareCardCanvas" class="share-card">
+                    <!-- Generated by JS -->
+                </div>
+                <div class="share-actions">
+                    <button class="btn btn-primary" onclick="downloadShareCard()"><i class="fas fa-download"></i> Save Image</button>
+                    <button class="btn btn-secondary" onclick="copyShareText()"><i class="fas fa-copy"></i> Copy Text</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- H2H Challenge Modal -->
+    <div id="h2hChallengeModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h4><i class="fas fa-people-arrows"></i> Challenge a Player</h4>
+                <span class="close" onclick="closeModal('h2hChallengeModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Search Player</label>
+                    <input type="text" id="h2hSearchInput" placeholder="Type a username..." oninput="searchH2HOpponent()">
+                </div>
+                <div id="h2hSearchResults" class="h2h-search-results"></div>
+                <div class="form-group">
+                    <label>Gameweek</label>
+                    <select id="h2hGameweek" class="gameweek-selector">
+                    </select>
+                </div>
+                <button class="btn btn-primary" onclick="sendH2HChallenge()" id="sendChallengeBtn" disabled><i class="fas fa-paper-plane"></i> Send Challenge</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Badge Notification -->
+    <div id="badgeNotification" class="badge-notification" style="display: none;">
+        <div class="badge-notif-content">
+            <i class="fas fa-medal"></i>
+            <div>
+                <strong>Badge Unlocked!</strong>
+                <span id="badgeNotifText"></span>
             </div>
         </div>
     </div>

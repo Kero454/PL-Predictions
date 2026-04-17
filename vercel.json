@@ -16,8 +16,26 @@
       "dest": "/server.js"
     },
     {
-      "src": "/(.*)",
+      "src": "/socket\\.io/(.*)",
+      "dest": "/server.js"
+    },
+    {
+      "src": "/(.*\\.(js|css|svg|png|ico|json|webmanifest))",
       "dest": "/public/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/public/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/refresh-cache",
+      "schedule": "*/3 * * * *"
+    },
+    {
+      "path": "/api/cron/notifications",
+      "schedule": "* * * * *"
     }
   ],
   "env": {

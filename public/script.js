@@ -1,6 +1,6 @@
 // Global variables
 let currentUser = null;
-let currentGameweek = 1;
+let currentGameweek = null;
 let socket = null;
 let userPredictions = {};
 let userDoublerMatchId = null;
@@ -76,6 +76,12 @@ function getTeamLogo(teamName) {
 
 // Initialize the app
 document.addEventListener('DOMContentLoaded', function() {
+    // Inject app logo into navbar
+    const navLogo = document.getElementById('navLogoIcon');
+    if (navLogo) {
+        navLogo.innerHTML = '<img src="/icons/icon-192.svg" alt="Logo" width="32" height="32">';
+    }
+
     // Check if user is already logged in
     const token = localStorage.getItem('token');
     if (token) {
@@ -157,8 +163,13 @@ function switchTab(tab) {
 async function handleLogin(e) {
     e.preventDefault();
     
-    const username = document.getElementById('loginUsername').value;
+    const username = document.getElementById('loginUsername').value.trim();
     const password = document.getElementById('loginPassword').value;
+    
+    if (!username || !password) {
+        showError('Please enter username and password');
+        return;
+    }
     
     try {
         const response = await fetch('/api/login', {
@@ -169,7 +180,15 @@ async function handleLogin(e) {
             body: JSON.stringify({ username, password })
         });
         
-        const data = await response.json();
+        const text = await response.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (parseErr) {
+            console.error('Login response not JSON:', text);
+            showError('Server error. Please try again.');
+            return;
+        }
         
         if (response.ok) {
             localStorage.setItem('token', data.token);
@@ -177,18 +196,53 @@ async function handleLogin(e) {
             currentUser = data.user;
             showMainApp();
         } else {
-            showError(data.error);
+            showError(data.error || 'Login failed');
         }
     } catch (error) {
-        showError('Login failed. Please try again.');
+        console.error('Login error:', error.message || String(error), error);
+        showError('Login failed. Check your connection and try again.');
     }
 }
 
 async function handleRegister(e) {
     e.preventDefault();
     
-    const username = document.getElementById('registerUsername').value;
+    const username = document.getElementById('registerUsername').value.trim();
     const password = document.getElementById('registerPassword').value;
+    const confirmEl = document.getElementById('registerConfirmPassword');
+    const confirmPassword = confirmEl ? confirmEl.value : password;
+    
+    // Basic validation
+    if (!username || username.length < 3) {
+        showError('Username must be at least 3 characters');
+        return;
+    }
+    
+    // Password validation
+    if (password.length < 8) {
+        showError('Password must be at least 8 characters');
+        return;
+    }
+    if (!/[A-Z]/.test(password)) {
+        showError('Password needs at least one uppercase letter');
+        return;
+    }
+    if (!/[a-z]/.test(password)) {
+        showError('Password needs at least one lowercase letter');
+        return;
+    }
+    if (!/[0-9]/.test(password)) {
+        showError('Password needs at least one number');
+        return;
+    }
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+        showError('Password needs at least one special character (!@#$%...)');
+        return;
+    }
+    if (password !== confirmPassword) {
+        showError('Passwords do not match');
+        return;
+    }
     
     try {
         const response = await fetch('/api/register', {
@@ -199,36 +253,33 @@ async function handleRegister(e) {
             body: JSON.stringify({ username, password })
         });
         
-        const data = await response.json();
+        // Read response as text first, then parse
+        const text = await response.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (parseErr) {
+            console.error('Register response not JSON:', text);
+            showError('Server error. Please try again.');
+            return;
+        }
         
         if (response.ok) {
             localStorage.setItem('token', data.token);
             localStorage.setItem('userData', JSON.stringify(data.user));
             currentUser = data.user;
-            showMainApp();
+            try {
+                showMainApp();
+            } catch (appError) {
+                console.error('showMainApp error after register:', appError.message, appError.stack, appError);
+            }
         } else {
-            showError(data.error);
+            showError(data.error || 'Registration failed');
         }
     } catch (error) {
-        showError('Registration failed. Please try again.');
+        console.error('Registration fetch error:', error.message || error.name || String(error), error);
+        showError('Registration failed. Check your connection and try again.');
     }
-}
-
-function showMainApp() {
-    document.getElementById('authSection').style.display = 'none';
-    document.getElementById('mainApp').style.display = 'block';
-    document.getElementById('usernameDisplay').textContent = currentUser.username;
-    document.getElementById('userScore').textContent = currentUser.score;
-    
-    // Initialize socket connection
-    socket = io();
-    setupSocketListeners();
-    
-    // Load initial data
-    loadGameweeks();
-    loadMatches();
-    loadLeaderboard();
-    loadMyPredictions();
 }
 
 function logout() {
@@ -238,14 +289,25 @@ function logout() {
     
     if (socket) {
         socket.disconnect();
+        socket = null;
     }
     
+    // Hide navbar and main app, show auth
+    const nav = document.getElementById('mainNavbar');
+    if (nav) nav.style.display = 'none';
     document.getElementById('authSection').style.display = 'flex';
     document.getElementById('mainApp').style.display = 'none';
     
     // Clear forms
     document.getElementById('loginForm').reset();
     document.getElementById('registerForm').reset();
+    
+    // Reset password validation UI
+    const strengthBar = document.getElementById('strengthBar');
+    if (strengthBar) strengthBar.style.width = '0';
+    const passwordMatch = document.getElementById('passwordMatch');
+    if (passwordMatch) { passwordMatch.textContent = ''; passwordMatch.className = 'password-match'; }
+    document.querySelectorAll('.password-rules .rule').forEach(r => r.classList.remove('pass'));
 }
 
 // Navigation functions
@@ -266,44 +328,15 @@ function showSection(sectionName) {
         case 'leaderboard':
             loadLeaderboard();
             break;
+        case 'achievements':
+            loadAchievements();
+            break;
     }
 }
 
 function toggleMenu() {
     const navMenu = document.getElementById('navMenu');
     navMenu.classList.toggle('active');
-}
-
-// Data loading functions
-async function loadGameweeks() {
-    try {
-        const response = await fetch('/api/gameweeks');
-        const gameweeks = await response.json();
-        
-        const selector = document.getElementById('gameweekSelector');
-        selector.innerHTML = '';
-        
-        gameweeks.forEach(gw => {
-            const option = document.createElement('option');
-            option.value = gw.gameweek;
-            option.textContent = `GW ${gw.gameweek} (${gw.status})`;
-            if (gw.gameweek === currentGameweek) {
-                option.selected = true;
-            }
-            selector.appendChild(option);
-        });
-        
-        // Set current gameweek to first upcoming if not set
-        if (!currentGameweek) {
-            const upcomingGW = gameweeks.find(gw => gw.status === 'upcoming');
-            if (upcomingGW) {
-                currentGameweek = upcomingGW.gameweek;
-                selector.value = currentGameweek;
-            }
-        }
-    } catch (error) {
-        console.error('Failed to load gameweeks:', error);
-    }
 }
 
 async function loadMatches() {
@@ -326,8 +359,9 @@ async function loadMatches() {
         document.getElementById('currentGameweek').textContent = currentGameweek;
         updateDeadlineDisplay();
         
-        // Load user's doubler for this gameweek
+        // Load user's doubler and predictions for this gameweek
         await loadUserDoubler(currentGameweek);
+        await loadUserPredictionsForGameweek();
         
         displayMatches(matches);
     } catch (error) {
@@ -388,61 +422,6 @@ async function loadMyPredictions() {
 }
 
 // UI creation functions
-function createMatchCard(match) {
-    const card = document.createElement('div');
-    const isDoubler = userDoublerMatchId === match.id;
-    const deadlinePassed = !canPredict;
-    
-    card.className = `match-card ${isDoubler ? 'doubler' : ''} ${deadlinePassed ? 'deadline-passed' : ''}`;
-    
-    const statusClass = `status-${match.status}`;
-    const matchDate = new Date(match.date).toLocaleDateString('en-US', {
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
-    
-    // Check if user has existing prediction (need to fetch from server)
-    // This will be populated when we load user predictions
-    const predictionText = '';
-    
-    card.innerHTML = `
-        <div class="match-header">
-            <div class="match-date">${matchDate}</div>
-            <div class="match-status ${statusClass}">${match.status.toUpperCase()}</div>
-        </div>
-        <div class="match-teams">
-            <div class="team">${match.homeTeam}</div>
-            <div class="vs">VS</div>
-            <div class="team">${match.awayTeam}</div>
-        </div>
-        ${predictionText}
-        ${match.status === 'upcoming' && canPredict ? `
-            <div class="match-actions">
-                <button class="btn btn-primary" onclick="openPredictionModal(${match.id}, '${match.homeTeam}', '${match.awayTeam}', '${match.date}', ${match.gameweek})">
-                    <i class="fas fa-crystal-ball"></i> ${userPrediction ? 'Edit Prediction' : 'Predict'}
-                </button>
-            </div>
-        ` : ''}
-        ${match.status === 'upcoming' && !canPredict ? `
-            <div class="match-actions">
-                <button class="btn btn-secondary" disabled>
-                    <i class="fas fa-lock"></i> Deadline Passed
-                </button>
-            </div>
-        ` : ''}
-        ${match.status === 'finished' ? `
-            <div class="final-score">
-                Final: ${match.homeScore} - ${match.awayScore}
-            </div>
-        ` : ''}
-    `;
-    
-    return card;
-}
-
 function createLeaderboardItem(player, rank) {
     const item = document.createElement('div');
     item.className = `leaderboard-item ${rank <= 3 ? 'top-3' : ''}`;
@@ -467,71 +446,43 @@ function createPredictionCard(prediction) {
     const card = document.createElement('div');
     card.className = `prediction-card ${prediction.isDoubler ? 'doubler' : ''}`;
     
-    const doublerText = prediction.isDoubler ? ' (DOUBLER)' : '';
-    const maxPoints = prediction.isDoubler ? '8' : '4';
+    const homeTeam = prediction.homeTeam || 'Home';
+    const awayTeam = prediction.awayTeam || 'Away';
+    const homeLogo = typeof getTeamLogoHTML === 'function' ? getTeamLogoHTML(homeTeam) : '';
+    const awayLogo = typeof getTeamLogoHTML === 'function' ? getTeamLogoHTML(awayTeam) : '';
+    const doublerBadge = prediction.isDoubler ? '<span class="doubler-badge">2x</span>' : '';
+    
+    // Show actual result if match is finished
+    let resultHTML = '';
+    if (prediction.matchStatus === 'finished' && prediction.actualHomeScore !== null) {
+        resultHTML = `<div class="prediction-result">Result: ${prediction.actualHomeScore} - ${prediction.actualAwayScore}</div>`;
+    } else if (prediction.matchStatus === 'live') {
+        resultHTML = `<div class="prediction-result live">LIVE</div>`;
+    }
     
     card.innerHTML = `
-        <div class="prediction-match">
-            <div>Match #${prediction.matchId}${doublerText}</div>
-            <div class="prediction-points">+${prediction.points}/${maxPoints} pts</div>
+        <div class="prediction-card-header">
+            <span class="prediction-gw">GW${prediction.gameweek || 1}</span>
+            ${doublerBadge}
         </div>
-        <div class="prediction-score">
-            Your prediction: ${prediction.homeScore} - ${prediction.awayScore}
+        <div class="prediction-teams">
+            <div class="prediction-team">
+                <span class="prediction-team-logo">${homeLogo}</span>
+                <span class="prediction-team-name">${homeTeam}</span>
+            </div>
+            <div class="prediction-vs">vs</div>
+            <div class="prediction-team">
+                <span class="prediction-team-logo">${awayLogo}</span>
+                <span class="prediction-team-name">${awayTeam}</span>
+            </div>
         </div>
-        <div class="prediction-gameweek">
-            Gameweek ${prediction.gameweek || 1}
+        <div class="prediction-your-score">
+            Your prediction: <strong>${prediction.homeScore} - ${prediction.awayScore}</strong>
         </div>
+        ${resultHTML}
     `;
     
     return card;
-}
-
-// Modal functions
-function openPredictionModal(matchId, homeTeam, awayTeam, matchDate, gameweek) {
-    currentMatchId = matchId;
-    
-    // Check if deadline has passed
-    const deadlineWarning = document.getElementById('modalDeadlineWarning');
-    const predictionForm = document.getElementById('predictionForm');
-    
-    if (!canPredict) {
-        deadlineWarning.style.display = 'flex';
-        predictionForm.style.display = 'none';
-    } else {
-        deadlineWarning.style.display = 'none';
-        predictionForm.style.display = 'block';
-    }
-    
-    document.getElementById('modalHomeTeam').textContent = homeTeam;
-    document.getElementById('modalAwayTeam').textContent = awayTeam;
-    document.getElementById('homeTeamLabel').textContent = homeTeam;
-    document.getElementById('awayTeamLabel').textContent = awayTeam;
-    
-    const date = new Date(matchDate).toLocaleDateString('en-US', {
-        weekday: 'long',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
-    document.getElementById('modalMatchDate').textContent = date;
-    
-    // Load existing prediction if any (fetch from server)
-    loadExistingPrediction(matchId);
-    
-    // Reset form initially
-    document.getElementById('homeScore').value = '';
-    document.getElementById('awayScore').value = '';
-    document.getElementById('doublerCheckbox').checked = userDoublerMatchId === matchId;
-    
-    document.getElementById('predictionModal').style.display = 'block';
-}
-
-function closePredictionModal() {
-    document.getElementById('predictionModal').style.display = 'none';
-    document.getElementById('predictionForm').reset();
-    document.getElementById('doublerCheckbox').checked = false;
-    currentMatchId = null;
 }
 
 async function handlePredictionSubmit(e) {
@@ -570,6 +521,11 @@ async function handlePredictionSubmit(e) {
             closePredictionModal();
             loadMyPredictions();
             loadMatches(); // Refresh to show updated predictions
+            loadProfile(); // Refresh stats
+            // Show badge notifications if any new badges were earned
+            if (data.newBadges && data.newBadges.length > 0) {
+                showBadgeNotification(data.newBadges);
+            }
         } else {
             showError(data.error);
         }
@@ -578,15 +534,53 @@ async function handlePredictionSubmit(e) {
     }
 }
 
-// Utility functions
+// Utility functions - showError is defined later with a better UI
 function showError(message) {
-    // Simple alert for now - you can enhance this with a better notification system
-    alert('Error: ' + message);
+    let errorDiv = document.getElementById('errorMessage');
+    if (!errorDiv) {
+        errorDiv = document.createElement('div');
+        errorDiv.id = 'errorMessage';
+        errorDiv.style.cssText = 'position:fixed;top:20px;right:20px;background:#ff4444;color:white;padding:15px;border-radius:8px;z-index:10000;max-width:350px;font-size:0.9rem;box-shadow:0 4px 15px rgba(0,0,0,0.3);';
+        document.body.appendChild(errorDiv);
+    }
+    errorDiv.textContent = message;
+    errorDiv.style.display = 'block';
+    setTimeout(() => { errorDiv.style.display = 'none'; }, 5000);
 }
 
 function showSuccess(message) {
-    // Simple alert for now - you can enhance this with a better notification system
-    alert('Success: ' + message);
+    let successDiv = document.getElementById('successMessage');
+    if (!successDiv) {
+        successDiv = document.createElement('div');
+        successDiv.id = 'successMessage';
+        successDiv.style.cssText = 'position:fixed;top:20px;right:20px;background:#00b894;color:white;padding:15px;border-radius:8px;z-index:10000;max-width:350px;font-size:0.9rem;box-shadow:0 4px 15px rgba(0,0,0,0.3);';
+        document.body.appendChild(successDiv);
+    }
+    successDiv.textContent = message;
+    successDiv.style.display = 'block';
+    setTimeout(() => { successDiv.style.display = 'none'; }, 4000);
+}
+
+// Load user predictions for the current gameweek into the userPredictions map
+async function loadUserPredictionsForGameweek() {
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        const response = await fetch('/api/my-predictions', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+            const predictions = await response.json();
+            userPredictions = {};
+            predictions.forEach(p => {
+                if (p.gameweek == currentGameweek) {
+                    userPredictions[p.matchId] = p;
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Failed to load user predictions:', error);
+    }
 }
 
 // Load user's doubler for a gameweek
@@ -615,6 +609,10 @@ function setupSocketListeners() {
             // Update leaderboard in real-time
             updateLeaderboardDisplay(data.updatedLeaderboard);
             showSuccess(`Match ${data.matchId} result: ${data.homeScore}-${data.awayScore}`);
+        });
+        socket.on('matchStarting', (data) => {
+            if (typeof playFootballWhistle === 'function') playFootballWhistle();
+            showToast(`⚽ ${data.homeTeam} vs ${data.awayTeam} is about to kick off!`, 'info');
         });
     }
 }
@@ -736,18 +734,44 @@ function displayMatches(matches) {
 // Create a match card element
 function createMatchCard(match) {
     const card = document.createElement('div');
-    card.className = 'match-card';
     
     // Check if user has predicted this match
     const userPrediction = userPredictions[match.id];
+    const isDoubler = userDoublerMatchId == match.id;
     
-    let predictionText = '';
+    card.className = `match-card ${userPrediction ? 'predicted' : ''} ${isDoubler ? 'doubler' : ''}`;
+    
+    // Predicted badge + score overlay
+    let predictionOverlay = '';
     if (userPrediction) {
-        predictionText = `
-            <div class="user-prediction">
-                <span class="prediction-label">Your prediction:</span>
-                <span class="prediction-score">${userPrediction.homeScore} - ${userPrediction.awayScore}</span>
-                ${userPrediction.isDoubler ? '<span class="doubler-badge">DOUBLER</span>' : ''}
+        predictionOverlay = `
+            <div class="match-predicted-banner">
+                <i class="fas fa-check-circle"></i>
+                <span>Predicted: <strong>${userPrediction.homeScore} - ${userPrediction.awayScore}</strong></span>
+                ${userPrediction.isDoubler ? '<span class="doubler-badge">2x</span>' : ''}
+            </div>
+        `;
+    }
+    
+    // Action button
+    let actionHTML = '';
+    if (match.status === 'upcoming' && canPredict) {
+        const btnClass = userPrediction ? 'btn btn-edit' : 'btn btn-primary';
+        const btnIcon = userPrediction ? 'fas fa-pen' : 'fas fa-bullseye';
+        const btnText = userPrediction ? 'Edit Prediction' : 'Predict';
+        actionHTML = `
+            <div class="match-actions">
+                <button class="${btnClass}" onclick="openPredictionModal(${match.id}, '${match.homeTeam.replace(/'/g, "\\'")}', '${match.awayTeam.replace(/'/g, "\\'")}', '${match.date}', ${match.gameweek})">
+                    <i class="${btnIcon}"></i> ${btnText}
+                </button>
+            </div>
+        `;
+    } else if (match.status === 'upcoming' && !canPredict) {
+        actionHTML = `
+            <div class="match-actions">
+                <button class="btn btn-secondary" disabled>
+                    <i class="fas fa-lock"></i> Deadline Passed
+                </button>
             </div>
         `;
     }
@@ -769,26 +793,13 @@ function createMatchCard(match) {
                 <span class="team-name">${match.awayTeam}</span>
             </div>
         </div>
-        ${predictionText}
-        ${match.status === 'upcoming' && canPredict ? `
-            <div class="match-actions">
-                <button class="btn btn-primary" onclick="openPredictionModal(${match.id}, '${match.homeTeam}', '${match.awayTeam}', '${match.date}', ${match.gameweek})">
-                    <i class="fas fa-crystal-ball"></i> ${userPrediction ? 'Edit Prediction' : 'Predict'}
-                </button>
-            </div>
-        ` : ''}
-        ${match.status === 'upcoming' && !canPredict ? `
-            <div class="match-actions">
-                <button class="btn btn-secondary" disabled>
-                    <i class="fas fa-lock"></i> Deadline Passed
-                </button>
-            </div>
-        ` : ''}
+        ${predictionOverlay}
         ${match.status === 'finished' ? `
             <div class="final-score">
                 Final: ${match.homeScore} - ${match.awayScore}
             </div>
         ` : ''}
+        ${actionHTML}
     `;
     
     return card;
@@ -821,21 +832,58 @@ async function loadExistingPrediction(matchId) {
 
 // Open prediction modal
 function openPredictionModal(matchId, homeTeam, awayTeam, matchDate, gameweek) {
-    document.getElementById('modalHomeTeam').textContent = homeTeam;
-    document.getElementById('modalAwayTeam').textContent = awayTeam;
-    document.getElementById('modalMatchDate').textContent = new Date(matchDate).toLocaleDateString();
-    
     // Store match info for submission
     window.currentMatchId = matchId;
     window.currentGameweek = gameweek;
+    
+    // Set team names in modal
+    document.getElementById('modalHomeTeam').textContent = homeTeam;
+    document.getElementById('modalAwayTeam').textContent = awayTeam;
+    const homeLabel = document.getElementById('homeTeamLabel');
+    const awayLabel = document.getElementById('awayTeamLabel');
+    if (homeLabel) homeLabel.textContent = homeTeam;
+    if (awayLabel) awayLabel.textContent = awayTeam;
+    document.getElementById('modalMatchDate').textContent = new Date(matchDate).toLocaleDateString('en-US', {
+        weekday: 'long', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+    
+    // Deadline check
+    const deadlineWarning = document.getElementById('modalDeadlineWarning');
+    const predictionForm = document.getElementById('predictionForm');
+    if (deadlineWarning && predictionForm) {
+        if (!canPredict) {
+            deadlineWarning.style.display = 'flex';
+            predictionForm.style.display = 'none';
+        } else {
+            deadlineWarning.style.display = 'none';
+            predictionForm.style.display = 'block';
+        }
+    }
     
     // Reset form
     document.getElementById('homeScore').value = '';
     document.getElementById('awayScore').value = '';
     document.getElementById('doublerCheckbox').checked = false;
     
-    // Load existing prediction if any
-    loadExistingPrediction(matchId);
+    // Update doubler hint
+    const doublerHint = document.getElementById('doublerHint');
+    if (doublerHint) {
+        if (userDoublerMatchId && userDoublerMatchId != matchId) {
+            doublerHint.textContent = 'You already used your doubler on another match this gameweek. Checking this will move it here.';
+            doublerHint.style.display = 'block';
+        } else {
+            doublerHint.textContent = '';
+            doublerHint.style.display = 'none';
+        }
+    }
+    
+    // Load existing prediction if any (pre-fills the form for editing)
+    const existing = userPredictions[matchId];
+    if (existing) {
+        document.getElementById('homeScore').value = existing.homeScore;
+        document.getElementById('awayScore').value = existing.awayScore;
+        document.getElementById('doublerCheckbox').checked = !!existing.isDoubler;
+    }
     
     // Show modal
     document.getElementById('predictionModal').style.display = 'block';
@@ -880,6 +928,9 @@ function showError(message) {
 function showMainApp() {
     document.getElementById('authSection').style.display = 'none';
     document.getElementById('mainApp').style.display = 'block';
+    // Show navbar when logged in
+    const nav = document.getElementById('mainNavbar');
+    if (nav) nav.style.display = 'block';
     
     // Display username
     if (currentUser && currentUser.username) {
@@ -928,57 +979,73 @@ async function loadGameweeks() {
             return;
         }
         
-        console.log('Loading gameweeks into selector');
-        
-        // Clear existing options
-        selector.innerHTML = '';
-        
-        // Simple fallback first - just add all gameweeks
-        for (let i = 1; i <= 38; i++) {
-            const option = document.createElement('option');
-            option.value = i;
-            option.textContent = `Gameweek ${i}`;
-            if (i === currentGameweek) {
-                option.selected = true;
-            }
-            selector.appendChild(option);
-        }
-        
-        console.log('Added', selector.children.length, 'gameweek options');
-        
-        // Try to add status indicators
+        // Auto-detect current gameweek from API if not set
+        let matchList = [];
         try {
             const response = await fetch('/api/matches');
             if (response.ok) {
-                const allMatches = await response.json();
-                
-                // Update options with status
-                for (let i = 1; i <= 38; i++) {
-                    const gameweekMatches = allMatches.filter(m => m.gameweek === i);
-                    let status = '';
-                    
-                    if (gameweekMatches.length > 0) {
-                        const finished = gameweekMatches.filter(m => m.status === 'finished').length;
-                        const live = gameweekMatches.filter(m => m.status === 'live').length;
-                        
-                        if (finished === gameweekMatches.length) {
-                            status = ' ✅';
-                        } else if (live > 0) {
-                            status = ' 🔴';
-                        } else {
-                            status = ' ⏳';
-                        }
-                    }
-                    
-                    const option = selector.children[i - 1];
-                    if (option) {
-                        option.textContent = `Gameweek ${i}${status}`;
-                    }
+                const data = await response.json();
+                matchList = data.matches || data;
+                if (!Array.isArray(matchList)) matchList = [];
+            }
+        } catch (e) {
+            console.log('Could not fetch matches for gameweek detection');
+        }
+
+        // Set currentGameweek to first upcoming if not already set
+        if (!currentGameweek) {
+            const firstUpcoming = matchList.find(m => m.status === 'upcoming');
+            if (firstUpcoming) {
+                currentGameweek = firstUpcoming.gameweek;
+            } else {
+                // Fallback: last finished gameweek or 1
+                const finished = matchList.filter(m => m.status === 'finished');
+                if (finished.length > 0) {
+                    currentGameweek = Math.max(...finished.map(m => m.gameweek));
+                } else {
+                    currentGameweek = 1;
                 }
             }
-        } catch (statusError) {
-            console.log('Could not load match status, using simple gameweeks');
+            console.log('Auto-detected gameweek:', currentGameweek);
         }
+
+        // Clear and populate hidden select
+        selector.innerHTML = '';
+        for (let i = 1; i <= 38; i++) {
+            const option = document.createElement('option');
+            option.value = i;
+
+            // Add status indicator
+            const gwMatches = matchList.filter(m => m.gameweek === i);
+            let status = '';
+            if (gwMatches.length > 0) {
+                const finCount = gwMatches.filter(m => m.status === 'finished').length;
+                const liveCount = gwMatches.filter(m => m.status === 'live').length;
+                if (finCount === gwMatches.length) status = ' ✅';
+                else if (liveCount > 0) status = ' 🔴';
+                else status = ' ⏳';
+            }
+            option.textContent = `Gameweek ${i}${status}`;
+            if (i === currentGameweek) option.selected = true;
+            selector.appendChild(option);
+        }
+
+        // Update header display
+        const gwDisplay = document.getElementById('currentGameweek');
+        if (gwDisplay) gwDisplay.textContent = currentGameweek;
+
+        // Build gameweek statuses and render pills
+        const gameweekStatuses = {};
+        for (let i = 1; i <= 38; i++) {
+            const gwMatches = matchList.filter(m => m.gameweek === i);
+            if (gwMatches.length > 0) {
+                const finCount = gwMatches.filter(m => m.status === 'finished').length;
+                const liveCount = gwMatches.filter(m => m.status === 'live').length;
+                if (finCount === gwMatches.length) gameweekStatuses[i] = 'finished';
+                else if (liveCount > 0) gameweekStatuses[i] = 'live';
+            }
+        }
+        renderGameweekPills(gameweekStatuses);
         
     } catch (error) {
         console.error('Failed to load gameweeks:', error);
@@ -987,8 +1054,1449 @@ async function loadGameweeks() {
 
 // Close modal when clicking outside
 window.onclick = function(event) {
-    const modal = document.getElementById('predictionModal');
-    if (event.target === modal) {
-        closePredictionModal();
+    const modals = ['predictionModal', 'createLeagueModal', 'joinLeagueModal', 'shareCardModal'];
+    modals.forEach(id => {
+        const modal = document.getElementById(id);
+        if (event.target === modal) {
+            modal.style.display = 'none';
+        }
+    });
+}
+
+// Generic close modal
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+}
+
+// ===== LEAGUES =====
+
+function openCreateLeagueModal() {
+    document.getElementById('createLeagueModal').style.display = 'block';
+    document.getElementById('leagueName').value = '';
+}
+
+function openJoinLeagueModal() {
+    document.getElementById('joinLeagueModal').style.display = 'block';
+    document.getElementById('inviteCode').value = '';
+}
+
+async function handleCreateLeague(e) {
+    e.preventDefault();
+    const name = document.getElementById('leagueName').value.trim();
+    if (!name) return;
+
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/leagues', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ name })
+        });
+        const data = await response.json();
+        if (response.ok) {
+            closeModal('createLeagueModal');
+            showSuccess(`League "${data.name}" created! Invite code: ${data.inviteCode}`);
+            loadLeagues();
+        } else {
+            showError(data.error);
+        }
+    } catch (error) {
+        showError('Failed to create league');
+    }
+}
+
+async function handleJoinLeague(e) {
+    e.preventDefault();
+    const inviteCode = document.getElementById('inviteCode').value.trim().toUpperCase();
+    if (!inviteCode) return;
+
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/leagues/join', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ inviteCode })
+        });
+        const data = await response.json();
+        if (response.ok) {
+            closeModal('joinLeagueModal');
+            showSuccess(`Joined league "${data.name}"!`);
+            loadLeagues();
+        } else {
+            showError(data.error);
+        }
+    } catch (error) {
+        showError('Failed to join league');
+    }
+}
+
+async function loadLeagues() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/leagues', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const leagues = await response.json();
+        const container = document.getElementById('leaguesList');
+
+        if (!leagues.length) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-users"></i>
+                    <p>No leagues yet. Create one and invite your friends!</p>
+                </div>`;
+            return;
+        }
+
+        container.innerHTML = leagues.map(league => `
+            <div class="league-card" onclick="openLeagueLeaderboard(${league.id})">
+                <div class="league-info">
+                    <h4>${league.name}</h4>
+                    <span class="league-meta"><i class="fas fa-users"></i> ${league.member_count} members</span>
+                    <span class="league-meta"><i class="fas fa-user"></i> Created by ${league.creator_name}</span>
+                </div>
+                <div class="league-code">
+                    <span class="code-label">Code</span>
+                    <span class="code-value">${league.invite_code}</span>
+                </div>
+                <i class="fas fa-chevron-right league-arrow"></i>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Failed to load leagues:', error);
+    }
+}
+
+async function openLeagueLeaderboard(leagueId) {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/leagues/${leagueId}/leaderboard`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+
+        document.getElementById('leaguesList').style.display = 'none';
+        document.getElementById('leagueLeaderboardView').style.display = 'block';
+        document.getElementById('leagueNameTitle').textContent = data.league.name;
+        document.getElementById('leagueInviteDisplay').textContent = data.league.invite_code;
+        window._currentLeagueCode = data.league.invite_code;
+
+        const list = document.getElementById('leagueLeaderboardList');
+        list.innerHTML = '';
+
+        data.leaderboard.forEach((player, index) => {
+            const item = createLeaderboardItem(player, index + 1);
+            list.appendChild(item);
+        });
+    } catch (error) {
+        showError('Failed to load league leaderboard');
+    }
+}
+
+function backToLeaguesList() {
+    document.getElementById('leaguesList').style.display = '';
+    document.getElementById('leagueLeaderboardView').style.display = 'none';
+}
+
+function copyInviteCode() {
+    const code = window._currentLeagueCode;
+    if (code) {
+        navigator.clipboard.writeText(code).then(() => {
+            const btn = document.getElementById('copyCodeBtn');
+            const original = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+            setTimeout(() => { btn.innerHTML = original; }, 2000);
+        });
+    }
+}
+
+// ===== ACHIEVEMENTS =====
+
+async function loadAchievements() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/achievements', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) throw new Error('Failed to load achievements');
+        const achievements = await response.json();
+        
+        const earned = achievements.filter(a => a.earned);
+        const locked = achievements.filter(a => !a.earned);
+        
+        // Summary
+        const summaryEl = document.getElementById('achievementsSummary');
+        if (summaryEl) {
+            summaryEl.innerHTML = `
+                <div class="achievements-progress">
+                    <div class="achievements-count">${earned.length} <span>/ ${achievements.length}</span></div>
+                    <div class="achievements-bar">
+                        <div class="achievements-bar-fill" style="width: ${Math.round((earned.length / achievements.length) * 100)}%"></div>
+                    </div>
+                    <div class="achievements-label">Achievements Unlocked</div>
+                </div>
+            `;
+        }
+        
+        // Grid
+        const gridEl = document.getElementById('achievementsGrid');
+        if (gridEl) {
+            gridEl.innerHTML = '';
+            
+            // Earned first, then locked
+            const sorted = [...earned, ...locked];
+            sorted.forEach(a => {
+                const card = document.createElement('div');
+                card.className = `achievement-card ${a.earned ? 'earned' : 'locked'}`;
+                const dateStr = a.earned_at ? new Date(a.earned_at).toLocaleDateString() : '';
+                card.innerHTML = `
+                    <div class="achievement-icon" style="color: ${a.earned ? a.color : '#555'}">
+                        <i class="${a.icon}"></i>
+                    </div>
+                    <div class="achievement-info">
+                        <div class="achievement-name">${a.name}</div>
+                        <div class="achievement-desc">${a.description}</div>
+                        ${a.earned ? `<div class="achievement-date">Earned ${dateStr}</div>` : '<div class="achievement-locked"><i class="fas fa-lock"></i> Locked</div>'}
+                    </div>
+                `;
+                gridEl.appendChild(card);
+            });
+        }
+    } catch (error) {
+        console.error('Failed to load achievements:', error);
+    }
+}
+
+// ===== PROFILE & STATS =====
+
+async function loadProfile() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/profile', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const profile = await response.json();
+
+        // Update header stats
+        const streakEl = document.getElementById('userStreak');
+        const rankEl = document.getElementById('userRank');
+        if (streakEl) streakEl.textContent = profile.currentStreak;
+        if (rankEl) rankEl.textContent = profile.rank;
+
+        // Profile stats grid
+        const statsGrid = document.getElementById('profileStats');
+        if (statsGrid) {
+            statsGrid.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-trophy"></i></div>
+                    <div class="stat-value">${profile.score}</div>
+                    <div class="stat-label">Total Points</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-ranking-star"></i></div>
+                    <div class="stat-value">#${profile.rank}</div>
+                    <div class="stat-label">Global Rank</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-fire"></i></div>
+                    <div class="stat-value">${profile.currentStreak}</div>
+                    <div class="stat-label">Current Streak</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-meteor"></i></div>
+                    <div class="stat-value">${profile.bestStreak}</div>
+                    <div class="stat-label">Best Streak</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-futbol"></i></div>
+                    <div class="stat-value">${profile.predictions}</div>
+                    <div class="stat-label">Predictions</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-medal"></i></div>
+                    <div class="stat-value">${profile.badges.length}</div>
+                    <div class="stat-label">Badges</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-users"></i></div>
+                    <div class="stat-value">${profile.leagues}</div>
+                    <div class="stat-label">Leagues</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon"><i class="fas fa-earth-americas"></i></div>
+                    <div class="stat-value">${profile.totalPlayers}</div>
+                    <div class="stat-label">Total Players</div>
+                </div>
+            `;
+        }
+
+        // Badges
+        loadBadgesDisplay(profile.badges);
+
+    } catch (error) {
+        console.error('Failed to load profile:', error);
+    }
+}
+
+async function loadBadgesDisplay(earnedBadges) {
+    try {
+        const response = await fetch('/api/badges/all');
+        const allBadges = await response.json();
+
+        const grid = document.getElementById('badgesGrid');
+        if (!grid) return;
+
+        const earnedKeys = earnedBadges ? earnedBadges.map(b => b.key) : [];
+
+        grid.innerHTML = Object.entries(allBadges).map(([key, badge]) => {
+            const earned = earnedKeys.includes(key);
+            return `
+                <div class="badge-item ${earned ? 'earned' : 'locked'}" title="${badge.description}">
+                    <div class="badge-icon" style="${earned ? 'color:' + badge.color : ''}">
+                        <i class="${badge.icon}"></i>
+                    </div>
+                    <div class="badge-name">${badge.name}</div>
+                    <div class="badge-desc">${badge.description}</div>
+                    ${earned ? '<div class="badge-earned"><i class="fas fa-check-circle"></i></div>' : '<div class="badge-lock"><i class="fas fa-lock"></i></div>'}
+                </div>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('Failed to load badges:', error);
+    }
+}
+
+// ===== WEEKLY WINNER BANNER =====
+
+async function loadWeeklyWinner() {
+    try {
+        // Try to load winner for the previous gameweek
+        const gwToCheck = currentGameweek > 1 ? currentGameweek - 1 : 1;
+        const response = await fetch(`/api/weekly-winner/${gwToCheck}`);
+        const winner = await response.json();
+
+        const banner = document.getElementById('weeklyWinnerBanner');
+        if (winner && winner.username) {
+            document.getElementById('winnerGameweek').textContent = winner.gameweek;
+            document.getElementById('winnerName').textContent = winner.username;
+            document.getElementById('winnerScore').textContent = winner.score;
+            banner.style.display = 'block';
+        } else {
+            banner.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Failed to load weekly winner:', error);
+    }
+}
+
+async function loadWeeklyWinnersHistory() {
+    try {
+        const response = await fetch('/api/weekly-winners');
+        const winners = await response.json();
+        const container = document.getElementById('winnersHistory');
+        if (!container) return;
+
+        if (!winners.length) {
+            container.innerHTML = '<p class="empty-text">No weekly champions declared yet.</p>';
+            return;
+        }
+
+        container.innerHTML = winners.map(w => `
+            <div class="winner-row">
+                <span class="winner-gw">GW${w.gameweek}</span>
+                <span class="winner-name"><i class="fas fa-crown" style="color: #FFD700;"></i> ${w.username}</span>
+                <span class="winner-pts">${w.score} pts</span>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Failed to load winners history:', error);
+    }
+}
+
+// ===== SHARE CARD =====
+
+async function openShareCard() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/share-card', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+
+        const canvas = document.getElementById('shareCardCanvas');
+        canvas.innerHTML = `
+            <div class="share-card-inner">
+                <div class="share-card-header">
+                    <i class="fas fa-futbol"></i>
+                    <span>PL Predictions</span>
+                </div>
+                <div class="share-card-username">${data.username}</div>
+                <div class="share-card-stats">
+                    <div class="share-stat">
+                        <div class="share-stat-value">${data.score}</div>
+                        <div class="share-stat-label">Points</div>
+                    </div>
+                    <div class="share-stat">
+                        <div class="share-stat-value">#${data.rank}</div>
+                        <div class="share-stat-label">Rank</div>
+                    </div>
+                    <div class="share-stat">
+                        <div class="share-stat-value">${data.currentStreak}</div>
+                        <div class="share-stat-label">Streak</div>
+                    </div>
+                    <div class="share-stat">
+                        <div class="share-stat-value">${data.predictions}</div>
+                        <div class="share-stat-label">Predictions</div>
+                    </div>
+                </div>
+                <div class="share-card-footer">
+                    <span>${data.badgeCount} badges earned</span>
+                    <span>Rank ${data.rank} of ${data.totalPlayers}</span>
+                </div>
+                <div class="share-card-cta">Can you beat me? Join now!</div>
+            </div>
+        `;
+
+        window._shareCardData = data;
+        document.getElementById('shareCardModal').style.display = 'block';
+    } catch (error) {
+        showError('Failed to generate share card');
+    }
+}
+
+function copyShareText() {
+    const data = window._shareCardData;
+    if (!data) return;
+    const text = `I scored ${data.score} points in PL Predictions! Rank #${data.rank} with a ${data.currentStreak}-game streak. Can you beat me? Join now!`;
+    navigator.clipboard.writeText(text).then(() => {
+        showSuccess('Share text copied to clipboard!');
+    });
+}
+
+function downloadShareCard() {
+    // Use html2canvas if available, otherwise just copy text
+    const card = document.getElementById('shareCardCanvas');
+    if (typeof html2canvas !== 'undefined') {
+        html2canvas(card).then(canvas => {
+            const link = document.createElement('a');
+            link.download = 'pl-predictions-card.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        });
+    } else {
+        // Fallback: copy text
+        copyShareText();
+        showSuccess('Text copied! (Add html2canvas library for image download)');
+    }
+}
+
+// ===== BADGE NOTIFICATION =====
+
+function showBadgeNotification(badgeKeys) {
+    if (!badgeKeys || !badgeKeys.length) return;
+
+    const notif = document.getElementById('badgeNotification');
+    const text = document.getElementById('badgeNotifText');
+
+    // Show each badge notification sequentially
+    let i = 0;
+    function showNext() {
+        if (i >= badgeKeys.length) return;
+        text.textContent = badgeKeys[i];
+        notif.style.display = 'block';
+        notif.classList.add('show');
+        setTimeout(() => {
+            notif.classList.remove('show');
+            setTimeout(() => {
+                notif.style.display = 'none';
+                i++;
+                showNext();
+            }, 300);
+        }, 3000);
+    }
+    showNext();
+}
+
+// ===== SHOW SUCCESS NOTIFICATION =====
+
+function showSuccess(message) {
+    let successDiv = document.getElementById('successMessage');
+    if (!successDiv) {
+        successDiv = document.createElement('div');
+        successDiv.id = 'successMessage';
+        successDiv.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #00b894, #00cec9);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            z-index: 10000;
+            max-width: 350px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            font-weight: 500;
+            animation: slideIn 0.3s ease;
+        `;
+        document.body.appendChild(successDiv);
+    }
+    successDiv.textContent = message;
+    successDiv.style.display = 'block';
+    setTimeout(() => { successDiv.style.display = 'none'; }, 4000);
+}
+
+// ===== UPDATE showSection to handle new sections =====
+
+// Override showSection to support leagues and profile
+const _originalShowSection = typeof showSection === 'function' ? showSection : null;
+
+showSection = function(sectionName) {
+    const sections = document.querySelectorAll('.section');
+    sections.forEach(section => section.classList.remove('active'));
+
+    const target = document.getElementById(sectionName + 'Section');
+    if (target) target.classList.add('active');
+
+    // Update active tab in navbar
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.section === sectionName);
+    });
+
+    // Reset league sub-view when navigating away
+    if (sectionName !== 'leagues') {
+        backToLeaguesList();
+    }
+
+    // Load data for the section
+    switch(sectionName) {
+        case 'matches':
+            loadMatches();
+            break;
+        case 'predictions':
+            loadMyPredictions();
+            break;
+        case 'leaderboard':
+            loadLeaderboard();
+            break;
+        case 'leagues':
+            loadLeagues();
+            break;
+        case 'h2h':
+            loadH2HChallenges();
+            break;
+        case 'reveal':
+            break;
+        case 'seasonStats':
+            loadSeasonStats();
+            break;
+        case 'notifications':
+            loadNotifications();
+            loadNotificationCount();
+            break;
+        case 'profile':
+            loadProfile();
+            loadWeeklyWinnersHistory();
+            break;
+    }
+}
+
+// ===== UPDATE showMainApp to load new features =====
+
+const _origShowMainApp = showMainApp;
+showMainApp = function() {
+    document.getElementById('authSection').style.display = 'none';
+    document.getElementById('mainApp').style.display = 'block';
+    // Show navbar when logged in
+    const nav = document.getElementById('mainNavbar');
+    if (nav) nav.style.display = 'block';
+
+    if (currentUser && currentUser.username) {
+        const usernameDisplay = domCache.usernameDisplay || document.getElementById('usernameDisplay');
+        if (usernameDisplay) usernameDisplay.textContent = currentUser.username;
+    }
+
+    if (!socket) {
+        socket = io();
+        socket.on('leaderboardUpdate', loadLeaderboard);
+        // Listen for real-time notifications
+        socket.on('notification', (data) => {
+            if (data.userId === currentUser.id) {
+                loadNotificationCount();
+            }
+        });
+    }
+
+    loadGameweeks().then(() => {
+        loadMatches();
+        loadLeaderboard();
+        loadMyPredictions();
+        loadProfile();
+        loadWeeklyWinner();
+        loadNotificationCount();
+        populateRevealSelector();
+    });
+}
+
+// ===== HEAD-TO-HEAD =====
+
+let selectedOpponentId = null;
+
+function openH2HChallengeModal() {
+    document.getElementById('h2hChallengeModal').style.display = 'block';
+    document.getElementById('h2hSearchInput').value = '';
+    document.getElementById('h2hSearchResults').innerHTML = '';
+    document.getElementById('sendChallengeBtn').disabled = true;
+    selectedOpponentId = null;
+
+    // Populate gameweek selector
+    const sel = document.getElementById('h2hGameweek');
+    sel.innerHTML = '';
+    for (let i = 1; i <= 38; i++) {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = `Gameweek ${i}`;
+        if (i === currentGameweek) opt.selected = true;
+        sel.appendChild(opt);
+    }
+}
+
+let h2hSearchTimeout = null;
+function searchH2HOpponent() {
+    clearTimeout(h2hSearchTimeout);
+    const query = document.getElementById('h2hSearchInput').value.trim();
+    if (query.length < 2) {
+        document.getElementById('h2hSearchResults').innerHTML = '';
+        return;
+    }
+    h2hSearchTimeout = setTimeout(async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const users = await response.json();
+            const container = document.getElementById('h2hSearchResults');
+            if (!users.length) {
+                container.innerHTML = '<div class="h2h-no-results">No players found</div>';
+                return;
+            }
+            container.innerHTML = users.map(u => `
+                <div class="h2h-user-result ${selectedOpponentId === u.id ? 'selected' : ''}" onclick="selectH2HOpponent(${u.id}, '${u.username}')">
+                    <span class="h2h-user-name">${u.username}</span>
+                    <span class="h2h-user-score">${u.score} pts</span>
+                </div>
+            `).join('');
+        } catch (e) {
+            console.error('H2H search error:', e);
+        }
+    }, 300);
+}
+
+function selectH2HOpponent(id, name) {
+    selectedOpponentId = id;
+    document.getElementById('sendChallengeBtn').disabled = false;
+    // Highlight selected
+    document.querySelectorAll('.h2h-user-result').forEach(el => el.classList.remove('selected'));
+    event.currentTarget.classList.add('selected');
+}
+
+async function sendH2HChallenge() {
+    if (!selectedOpponentId) return;
+    const gameweek = parseInt(document.getElementById('h2hGameweek').value);
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/h2h/challenge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ opponentId: selectedOpponentId, gameweek })
+        });
+        const data = await response.json();
+        if (response.ok) {
+            closeModal('h2hChallengeModal');
+            showSuccess('Challenge sent!');
+            loadH2HChallenges();
+        } else {
+            showError(data.error);
+        }
+    } catch (e) {
+        showError('Failed to send challenge');
+    }
+}
+
+async function loadH2HChallenges() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/h2h', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const challenges = await response.json();
+
+        const pending = challenges.filter(c => c.status === 'pending' && c.opponent_id === currentUser.id);
+        const rest = challenges.filter(c => !(c.status === 'pending' && c.opponent_id === currentUser.id));
+
+        // Pending challenges (need action)
+        const pendingContainer = document.getElementById('h2hPending');
+        if (pending.length > 0) {
+            pendingContainer.innerHTML = `
+                <h4 style="color:#ffd700; margin-bottom:0.75rem;"><i class="fas fa-exclamation-circle"></i> Pending Challenges</h4>
+                ${pending.map(c => `
+                    <div class="h2h-card pending">
+                        <div class="h2h-card-header">
+                            <span class="h2h-gw">GW${c.gameweek}</span>
+                            <span class="h2h-status status-pending">PENDING</span>
+                        </div>
+                        <div class="h2h-players">
+                            <span class="h2h-player">${c.challenger_name}</span>
+                            <span class="h2h-vs">VS</span>
+                            <span class="h2h-player">${c.opponent_name}</span>
+                        </div>
+                        <div class="h2h-actions">
+                            <button class="btn btn-primary btn-sm" onclick="acceptChallenge(${c.id})"><i class="fas fa-check"></i> Accept</button>
+                            <button class="btn btn-secondary btn-sm" onclick="declineChallenge(${c.id})"><i class="fas fa-times"></i> Decline</button>
+                        </div>
+                    </div>
+                `).join('')}`;
+        } else {
+            pendingContainer.innerHTML = '';
+        }
+
+        // All other challenges
+        const listContainer = document.getElementById('h2hList');
+        if (!rest.length && !pending.length) {
+            listContainer.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-people-arrows"></i>
+                    <p>No challenges yet. Challenge a friend!</p>
+                </div>`;
+            return;
+        }
+
+        listContainer.innerHTML = rest.map(c => {
+            const statusClass = c.status === 'accepted' ? 'status-active' : c.status === 'completed' ? 'status-completed' : c.status === 'declined' ? 'status-declined' : 'status-pending';
+            const isMeChallenger = c.challenger_id === currentUser.id;
+            return `
+                <div class="h2h-card ${c.status}">
+                    <div class="h2h-card-header">
+                        <span class="h2h-gw">GW${c.gameweek}</span>
+                        <span class="h2h-status ${statusClass}">${c.status.toUpperCase()}</span>
+                    </div>
+                    <div class="h2h-players">
+                        <div class="h2h-player-side ${c.winner_id === c.challenger_id ? 'winner' : ''}">
+                            <span class="h2h-player-name">${c.challenger_name}</span>
+                            ${c.status === 'completed' ? `<span class="h2h-score">${c.challenger_score} pts</span>` : ''}
+                        </div>
+                        <span class="h2h-vs">VS</span>
+                        <div class="h2h-player-side ${c.winner_id === c.opponent_id ? 'winner' : ''}">
+                            <span class="h2h-player-name">${c.opponent_name}</span>
+                            ${c.status === 'completed' ? `<span class="h2h-score">${c.opponent_score} pts</span>` : ''}
+                        </div>
+                    </div>
+                    ${c.status === 'completed' && c.winner_name ? `<div class="h2h-winner"><i class="fas fa-trophy" style="color:#ffd700;"></i> ${c.winner_name} wins!</div>` : ''}
+                    ${c.status === 'completed' && !c.winner_id ? `<div class="h2h-winner"><i class="fas fa-handshake" style="color:#667eea;"></i> It's a draw!</div>` : ''}
+                    ${c.status === 'pending' && isMeChallenger ? `<div class="h2h-waiting"><i class="fas fa-hourglass-half"></i> Waiting for response...</div>` : ''}
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        console.error('Failed to load H2H challenges:', e);
+    }
+}
+
+async function acceptChallenge(id) {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/h2h/${id}/accept`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+            showSuccess('Challenge accepted!');
+            loadH2HChallenges();
+        } else {
+            const data = await response.json();
+            showError(data.error);
+        }
+    } catch (e) { showError('Failed to accept'); }
+}
+
+async function declineChallenge(id) {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/h2h/${id}/decline`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+            showSuccess('Challenge declined');
+            loadH2HChallenges();
+        }
+    } catch (e) { showError('Failed to decline'); }
+}
+
+// ===== PREDICTION REVEAL =====
+
+function populateRevealSelector() {
+    const sel = document.getElementById('revealGwSelector');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select Gameweek</option>';
+    for (let i = 1; i <= 38; i++) {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = `Gameweek ${i}`;
+        sel.appendChild(opt);
+    }
+}
+
+async function loadPredictionReveal() {
+    const gw = parseInt(document.getElementById('revealGwSelector').value);
+    const container = document.getElementById('revealContent');
+    if (!gw) {
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-eye-slash"></i><p>Select a gameweek</p></div>';
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/predictions/reveal/${gw}`);
+        const data = await response.json();
+
+        if (data.locked) {
+            container.innerHTML = `
+                <div class="reveal-locked">
+                    <i class="fas fa-lock"></i>
+                    <h4>Predictions Locked</h4>
+                    <p>Predictions will be revealed once the gameweek deadline passes.</p>
+                </div>`;
+            return;
+        }
+
+        if (!data.matches || !data.matches.length) {
+            container.innerHTML = '<div class="empty-state"><i class="fas fa-calendar-times"></i><p>No matches found for this gameweek</p></div>';
+            return;
+        }
+
+        container.innerHTML = data.matches.map(match => {
+            const matchPreds = data.predictions[match.id] || [];
+            return `
+                <div class="reveal-match-card">
+                    <div class="reveal-match-header">
+                        <span class="reveal-teams">${match.homeTeam} vs ${match.awayTeam}</span>
+                        ${match.status === 'finished' ? `<span class="reveal-result">Final: ${match.homeScore}-${match.awayScore}</span>` : `<span class="reveal-status">${match.status.toUpperCase()}</span>`}
+                    </div>
+                    <div class="reveal-predictions">
+                        ${matchPreds.length === 0 ? '<div class="reveal-none">No predictions</div>' :
+                        matchPreds.map(p => `
+                            <div class="reveal-pred-row">
+                                <span class="reveal-username">${p.username}</span>
+                                <span class="reveal-pred-score">${p.homeScore} - ${p.awayScore}</span>
+                                ${p.isDoubler ? '<span class="reveal-doubler">2x</span>' : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>Failed to load predictions</p></div>';
+    }
+}
+
+// ===== SEASON STATS =====
+
+async function loadSeasonStats() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/season-stats', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const stats = await response.json();
+
+        // Stats grid
+        const grid = document.getElementById('seasonStatsGrid');
+        grid.innerHTML = `
+            <div class="stat-card"><div class="stat-icon"><i class="fas fa-trophy"></i></div><div class="stat-value">${stats.totalPoints}</div><div class="stat-label">Total Points</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fas fa-ranking-star"></i></div><div class="stat-value">#${stats.rank}</div><div class="stat-label">Rank</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fas fa-bullseye"></i></div><div class="stat-value">${stats.accuracy}%</div><div class="stat-label">Accuracy</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fas fa-star"></i></div><div class="stat-value">${stats.perfectScores}</div><div class="stat-label">Perfect 4/4</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fas fa-check-circle"></i></div><div class="stat-value">${stats.correctResults}</div><div class="stat-label">Correct Results</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fas fa-crosshairs"></i></div><div class="stat-value">${stats.correctScorelines}</div><div class="stat-label">Exact Scores</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fas fa-fire"></i></div><div class="stat-value">${stats.currentStreak}</div><div class="stat-label">Current Streak</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fas fa-meteor"></i></div><div class="stat-value">${stats.bestStreak}</div><div class="stat-label">Best Streak</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fas fa-futbol"></i></div><div class="stat-value">${stats.totalPredicted}</div><div class="stat-label">Predictions</div></div>
+            <div class="stat-card"><div class="stat-icon"><i class="fas fa-chart-line"></i></div><div class="stat-value">${stats.avgPointsPerGW}</div><div class="stat-label">Avg Pts/GW</div></div>
+            <div class="stat-card highlight-green"><div class="stat-icon"><i class="fas fa-arrow-up"></i></div><div class="stat-value">${stats.bestGameweek ? stats.bestGameweek.points + ' pts' : '-'}</div><div class="stat-label">Best GW${stats.bestGameweek ? ' (' + stats.bestGameweek.gameweek + ')' : ''}</div></div>
+            <div class="stat-card highlight-red"><div class="stat-icon"><i class="fas fa-arrow-down"></i></div><div class="stat-value">${stats.worstGameweek ? stats.worstGameweek.points + ' pts' : '-'}</div><div class="stat-label">Worst GW${stats.worstGameweek ? ' (' + stats.worstGameweek.gameweek + ')' : ''}</div></div>
+        `;
+
+        // Bar chart for gameweek history
+        const chartContainer = document.getElementById('gwChart');
+        if (stats.gameweekHistory && stats.gameweekHistory.length > 0) {
+            const maxPts = Math.max(...stats.gameweekHistory.map(g => g.points), 1);
+            chartContainer.innerHTML = `
+                <div class="chart-bars">
+                    ${stats.gameweekHistory.map(g => {
+                        const pct = (g.points / maxPts) * 100;
+                        const isBest = stats.bestGameweek && g.gameweek === stats.bestGameweek.gameweek;
+                        return `
+                            <div class="chart-bar-group" title="GW${g.gameweek}: ${g.points} pts">
+                                <div class="chart-bar-value">${g.points}</div>
+                                <div class="chart-bar ${isBest ? 'bar-best' : ''}" style="height: ${Math.max(pct, 5)}%"></div>
+                                <div class="chart-bar-label">GW${g.gameweek}</div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+        } else {
+            chartContainer.innerHTML = '<p class="empty-text">No gameweek data yet. Start predicting!</p>';
+        }
+    } catch (e) {
+        console.error('Failed to load season stats:', e);
+    }
+}
+
+// ===== NOTIFICATIONS =====
+
+async function loadNotificationCount() {
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        const response = await fetch('/api/notifications', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        const badge = document.getElementById('notifBadge');
+        if (badge) {
+            if (data.unreadCount > 0) {
+                badge.textContent = data.unreadCount > 99 ? '99+' : data.unreadCount;
+                badge.style.display = 'inline-flex';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+    } catch (e) { console.error('Notif count error:', e); }
+}
+
+async function loadNotifications() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/notifications', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+
+        const container = document.getElementById('notificationsList');
+        if (!data.notifications.length) {
+            container.innerHTML = '<div class="empty-state"><i class="fas fa-bell-slash"></i><p>No notifications yet</p></div>';
+            return;
+        }
+
+        container.innerHTML = data.notifications.map(n => {
+            const iconMap = {
+                'h2h_challenge': 'fas fa-people-arrows',
+                'h2h_accepted': 'fas fa-check-circle',
+                'badge': 'fas fa-medal',
+                'result': 'fas fa-futbol',
+                'deadline': 'fas fa-clock'
+            };
+            const icon = iconMap[n.type] || 'fas fa-bell';
+            const timeAgo = getTimeAgo(new Date(n.created_at));
+            return `
+                <div class="notif-item ${n.is_read ? '' : 'unread'}" onclick="markNotifRead(${n.id})">
+                    <div class="notif-icon"><i class="${icon}"></i></div>
+                    <div class="notif-body">
+                        <div class="notif-title">${n.title}</div>
+                        <div class="notif-message">${n.message}</div>
+                        <div class="notif-time">${timeAgo}</div>
+                    </div>
+                    ${!n.is_read ? '<div class="notif-dot"></div>' : ''}
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        console.error('Failed to load notifications:', e);
+    }
+}
+
+function getTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+    if (seconds < 60) return 'Just now';
+    if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+    if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+    return Math.floor(seconds / 86400) + 'd ago';
+}
+
+async function markNotifRead(id) {
+    try {
+        const token = localStorage.getItem('token');
+        await fetch(`/api/notifications/${id}/read`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        loadNotifications();
+        loadNotificationCount();
+    } catch (e) {}
+}
+
+async function markAllNotificationsRead() {
+    try {
+        const token = localStorage.getItem('token');
+        await fetch('/api/notifications/read', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        showSuccess('All notifications marked as read');
+        loadNotifications();
+        loadNotificationCount();
+    } catch (e) { showError('Failed to mark notifications'); }
+}
+
+// Poll notification count every 30 seconds
+setInterval(() => {
+    if (currentUser) loadNotificationCount();
+}, 30000);
+
+// ===== PWA SERVICE WORKER REGISTRATION + PUSH NOTIFICATIONS =====
+
+let swRegistration = null;
+
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+            .then(reg => {
+                console.log('Service Worker registered:', reg.scope);
+                swRegistration = reg;
+            })
+            .catch(err => console.log('Service Worker registration failed:', err));
+    });
+    
+    // Listen for messages from service worker (e.g., play sound)
+    navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'PLAY_SOUND' && event.data.sound === 'football') {
+            playFootballWhistle();
+        }
+    });
+}
+
+// matchStarting socket listener is registered in setupSocketListeners()
+
+// Generate a referee whistle sound using Web Audio API (no external file needed)
+function playFootballWhistle() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        // Three short whistle tones (like a referee whistle)
+        const tones = [
+            { freq: 3200, start: 0, dur: 0.15 },
+            { freq: 3400, start: 0.2, dur: 0.15 },
+            { freq: 3600, start: 0.4, dur: 0.3 }
+        ];
+        tones.forEach(t => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = t.freq;
+            gain.gain.setValueAtTime(0.3, ctx.currentTime + t.start);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t.start + t.dur);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + t.start);
+            osc.stop(ctx.currentTime + t.start + t.dur + 0.05);
+        });
+        // Close context after sounds finish
+        setTimeout(() => ctx.close(), 1500);
+    } catch (e) {
+        console.log('Could not play notification sound:', e);
+    }
+}
+
+// Ask for push notification permission and subscribe
+async function subscribeToPushNotifications() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.log('Push notifications not supported');
+        return;
+    }
+
+    try {
+        // Get VAPID public key from server
+        const vapidResponse = await fetch('/api/push/vapid-public-key');
+        if (!vapidResponse.ok) return;
+        const { publicKey } = await vapidResponse.json();
+
+        // Request permission
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+            console.log('Notification permission denied');
+            return;
+        }
+
+        // Wait for SW registration
+        const registration = swRegistration || await navigator.serviceWorker.ready;
+
+        // Check existing subscription
+        let subscription = await registration.pushManager.getSubscription();
+
+        if (!subscription) {
+            // Convert VAPID key from base64
+            const applicationServerKey = urlBase64ToUint8Array(publicKey);
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey
+            });
+        }
+
+        // Send subscription to server
+        const token = localStorage.getItem('token');
+        await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ subscription })
+        });
+
+        console.log('Push notifications enabled');
+    } catch (error) {
+        console.error('Push subscription failed:', error);
+    }
+}
+
+// Convert base64 VAPID key to Uint8Array
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+}
+
+// Test push notification
+async function testPushNotification() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/push/test', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        showSuccess(data.message || 'Test notification sent!');
+    } catch (e) {
+        showError('Failed to send test notification');
+    }
+}
+
+// ===== PWA INSTALL PROMPT =====
+
+let deferredPrompt = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    // Show install banner if not dismissed before
+    if (!localStorage.getItem('installBannerDismissed')) {
+        const banner = document.getElementById('installBanner');
+        if (banner) banner.style.display = 'block';
+    }
+});
+
+function installPWA() {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then((choiceResult) => {
+        if (choiceResult.outcome === 'accepted') {
+            showSuccess('App installed! Check your home screen.');
+        }
+        deferredPrompt = null;
+        document.getElementById('installBanner').style.display = 'none';
+    });
+}
+
+function dismissInstallBanner() {
+    document.getElementById('installBanner').style.display = 'none';
+    localStorage.setItem('installBannerDismissed', 'true');
+}
+
+// Show banner on iOS Safari (no beforeinstallprompt)
+window.addEventListener('load', () => {
+    const isIOS = /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase());
+    const isInStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    if (isIOS && !isInStandalone && !localStorage.getItem('installBannerDismissed')) {
+        const banner = document.getElementById('installBanner');
+        if (banner) {
+            const installText = banner.querySelector('.install-text span');
+            if (installText) installText.textContent = 'Tap Share then "Add to Home Screen" for the best experience!';
+            const installBtn = document.getElementById('installBtn');
+            if (installBtn) installBtn.style.display = 'none';
+            banner.style.display = 'block';
+        }
+    }
+});
+
+// ===== GAMEWEEK PILLS SELECTOR =====
+
+function renderGameweekPills(gameweekStatuses) {
+    const container = document.getElementById('gameweekPills');
+    if (!container) return;
+    container.innerHTML = '';
+
+    for (let i = 1; i <= 38; i++) {
+        const pill = document.createElement('button');
+        pill.className = 'gw-pill';
+        pill.textContent = `GW${i}`;
+        pill.dataset.gw = i;
+
+        if (i === currentGameweek) pill.classList.add('active');
+
+        // Add status class if we have status info
+        if (gameweekStatuses && gameweekStatuses[i]) {
+            pill.classList.add(gameweekStatuses[i]);
+        }
+
+        pill.onclick = () => selectGameweekPill(i);
+        container.appendChild(pill);
+    }
+
+    // Auto-scroll to current gameweek
+    setTimeout(() => scrollToActivePill(), 100);
+}
+
+function selectGameweekPill(gw) {
+    currentGameweek = gw;
+
+    // Update pill active states
+    document.querySelectorAll('.gw-pill').forEach(p => p.classList.remove('active'));
+    const activePill = document.querySelector(`.gw-pill[data-gw="${gw}"]`);
+    if (activePill) activePill.classList.add('active');
+
+    // Update header display
+    const gwDisplay = document.getElementById('currentGameweek');
+    if (gwDisplay) gwDisplay.textContent = gw;
+
+    // Also sync hidden select
+    const selector = document.getElementById('gameweekSelector');
+    if (selector) selector.value = gw;
+
+    loadMatches();
+}
+
+function scrollGameweeks(direction) {
+    const container = document.getElementById('gameweekPills');
+    if (!container) return;
+    container.scrollBy({ left: direction * 200, behavior: 'smooth' });
+}
+
+function scrollToActivePill() {
+    const container = document.getElementById('gameweekPills');
+    const activePill = container ? container.querySelector('.gw-pill.active') : null;
+    if (activePill && container) {
+        const pillLeft = activePill.offsetLeft;
+        const containerWidth = container.offsetWidth;
+        container.scrollTo({
+            left: pillLeft - containerWidth / 2 + activePill.offsetWidth / 2,
+            behavior: 'smooth'
+        });
+    }
+}
+
+// Pills rendering is now handled inside loadGameweeks directly
+
+// ===== PASSWORD VALIDATION =====
+
+function checkPasswordStrength() {
+    const password = document.getElementById('registerPassword').value;
+    const strengthBar = document.getElementById('strengthBar');
+
+    const rules = {
+        length: password.length >= 8,
+        upper: /[A-Z]/.test(password),
+        lower: /[a-z]/.test(password),
+        number: /[0-9]/.test(password),
+        special: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)
+    };
+
+    // Update rule indicators
+    document.getElementById('ruleLength').classList.toggle('pass', rules.length);
+    document.getElementById('ruleUpper').classList.toggle('pass', rules.upper);
+    document.getElementById('ruleLower').classList.toggle('pass', rules.lower);
+    document.getElementById('ruleNumber').classList.toggle('pass', rules.number);
+    document.getElementById('ruleSpecial').classList.toggle('pass', rules.special);
+
+    // Calculate strength (0-5)
+    const score = Object.values(rules).filter(Boolean).length;
+
+    // Update strength bar
+    const widths = [0, 20, 40, 60, 80, 100];
+    const colors = ['#ff4444', '#ff6b35', '#ffa500', '#9acd32', '#00b894'];
+    strengthBar.style.width = widths[score] + '%';
+    strengthBar.style.background = colors[Math.max(0, score - 1)] || '#ff4444';
+
+    // Also check confirm password match
+    checkPasswordMatch();
+
+    return score;
+}
+
+function checkPasswordMatch() {
+    const password = document.getElementById('registerPassword').value;
+    const confirm = document.getElementById('registerConfirmPassword').value;
+    const matchDiv = document.getElementById('passwordMatch');
+
+    if (!confirm) {
+        matchDiv.textContent = '';
+        matchDiv.className = 'password-match';
+        return false;
+    }
+
+    if (password === confirm) {
+        matchDiv.textContent = 'Passwords match';
+        matchDiv.className = 'password-match match';
+        return true;
+    } else {
+        matchDiv.textContent = 'Passwords do not match';
+        matchDiv.className = 'password-match no-match';
+        return false;
+    }
+}
+
+function validateRegistrationPassword() {
+    const password = document.getElementById('registerPassword').value;
+    const confirm = document.getElementById('registerConfirmPassword').value;
+
+    if (password.length < 8) {
+        showError('Password must be at least 8 characters long');
+        return false;
+    }
+    if (!/[A-Z]/.test(password)) {
+        showError('Password must contain at least one uppercase letter');
+        return false;
+    }
+    if (!/[a-z]/.test(password)) {
+        showError('Password must contain at least one lowercase letter');
+        return false;
+    }
+    if (!/[0-9]/.test(password)) {
+        showError('Password must contain at least one number');
+        return false;
+    }
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+        showError('Password must contain at least one special character');
+        return false;
+    }
+    if (password !== confirm) {
+        showError('Passwords do not match');
+        return false;
+    }
+    return true;
+}
+
+// ===== PRO SUBSCRIPTION =====
+
+async function loadProStatus() {
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        const response = await fetch('/api/subscription/status', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+
+        const statusDiv = document.getElementById('proStatus');
+        const subscribeBtn = document.getElementById('proSubscribeBtn');
+
+        if (data.isPro) {
+            if (statusDiv) {
+                statusDiv.innerHTML = `
+                    <div class="pro-active-badge">
+                        <i class="fas fa-crown"></i> PRO ACTIVE
+                    </div>
+                    <p style="color: rgba(255,255,255,0.6); margin-top: 0.5rem; font-size: 0.85rem;">
+                        Active since ${new Date(data.subscribedAt).toLocaleDateString()}
+                        ${data.expiresAt ? ' - Renews ' + new Date(data.expiresAt).toLocaleDateString() : ''}
+                    </p>`;
+            }
+            if (subscribeBtn) {
+                subscribeBtn.textContent = 'Manage Subscription';
+                subscribeBtn.onclick = () => manageSubscription();
+            }
+
+            // Add pro badge to username
+            const usernameDisplay = document.getElementById('usernameDisplay');
+            if (usernameDisplay && !usernameDisplay.querySelector('.pro-badge-inline')) {
+                usernameDisplay.innerHTML += ' <span class="pro-badge-inline"><i class="fas fa-crown"></i> PRO</span>';
+            }
+        }
+
+        return data.isPro;
+    } catch (e) {
+        console.error('Failed to load pro status:', e);
+        return false;
+    }
+}
+
+async function subscribeToPro() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/subscription/create-checkout', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        const data = await response.json();
+
+        if (data.url) {
+            // Redirect to Stripe Checkout
+            window.location.href = data.url;
+        } else if (data.message) {
+            // Demo mode - simulate subscription
+            showSuccess(data.message);
+            loadProStatus();
+        } else {
+            showError(data.error || 'Failed to start checkout');
+        }
+    } catch (e) {
+        showError('Failed to start subscription process');
+    }
+}
+
+async function manageSubscription() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/subscription/manage', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        if (data.url) {
+            window.location.href = data.url;
+        } else {
+            showSuccess(data.message || 'Subscription management is available in your Stripe dashboard');
+        }
+    } catch (e) {
+        showError('Failed to open subscription management');
+    }
+}
+
+// Update showSection to handle pro section
+const __prevShowSection = showSection;
+showSection = function(sectionName) {
+    __prevShowSection(sectionName);
+    if (sectionName === 'pro') {
+        loadProStatus();
+    }
+}
+
+// Update showMainApp to load pro status and subscribe to push
+const __prevShowMainApp = showMainApp;
+showMainApp = function() {
+    __prevShowMainApp();
+    loadProStatus();
+    // Subscribe to push notifications after login (non-blocking)
+    if (typeof subscribeToPushNotifications === 'function') {
+        setTimeout(() => subscribeToPushNotifications(), 2000);
     }
 }

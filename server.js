@@ -5,8 +5,14 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const axios = require('axios');
 const cors = require('cors');
-const db = require('./database');
 require('dotenv').config();
+
+// Auto-select database: use Supabase if configured, otherwise SQLite for local dev
+const db = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY)
+  ? require('./database-supabase')
+  : require('./database');
+console.log(`Database mode: ${process.env.SUPABASE_URL ? 'Supabase (PostgreSQL)' : 'SQLite (local)'}`);
+
 
 const app = express();
 const server = http.createServer(app);
@@ -22,8 +28,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Health check endpoint for Railway - optimized for speed
+// Health check endpoint for Railway - serve index.html for browsers, OK for probes
 app.get('/', (req, res) => {
+  const accept = req.headers.accept || '';
+  if (accept.includes('text/html')) {
+    return res.sendFile('index.html', { root: 'public' });
+  }
   res.status(200).end('OK');
 });
 
@@ -47,6 +57,28 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 app.post('/api/register', async (req, res) => {
   try {
     const { username, password } = req.body;
+    
+    // Validate username
+    if (!username || username.length < 3 || username.length > 20) {
+      return res.status(400).json({ error: 'Username must be 3-20 characters' });
+    }
+    
+    // Validate password strength
+    if (!password || password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+    if (!/[A-Z]/.test(password)) {
+      return res.status(400).json({ error: 'Password must contain an uppercase letter' });
+    }
+    if (!/[a-z]/.test(password)) {
+      return res.status(400).json({ error: 'Password must contain a lowercase letter' });
+    }
+    if (!/[0-9]/.test(password)) {
+      return res.status(400).json({ error: 'Password must contain a number' });
+    }
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+      return res.status(400).json({ error: 'Password must contain a special character' });
+    }
     
     // Check if user already exists
     const existingUser = await db.getUserByUsername(username);
@@ -121,71 +153,101 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
-// Function to fetch Premier League matches from API
-const fetchPremierLeagueMatches = async (gameweek = null) => {
-  try {
-    const apiKey = process.env.FOOTBALL_API_KEY;
-    
-    if (!apiKey || apiKey === 'your-api-key-here') {
-      console.log('Using mock data - no API key configured');
-      return generateMockSeasonData(gameweek);
-    }
-    
-    console.log('Attempting API call with key:', apiKey.substring(0, 8) + '...');
-    
-    // Real API call to Football-Data.org - Current season 2025-26
-    const season = '2025'; // Premier League 2025-26 season
-    const url = gameweek 
-      ? `https://api.football-data.org/v4/competitions/PL/matches?season=${season}&matchday=${gameweek}`
-      : `https://api.football-data.org/v4/competitions/PL/matches?season=${season}`;
-    
-    console.log('API URL:', url);
-    
-    const response = await axios.get(url, {
-      headers: {
-        'X-Auth-Token': apiKey
-      },
-      timeout: 10000
-    });
-    
-    console.log('API Response status:', response.status);
-    console.log('Matches found:', response.data.matches?.length || 0);
-    
-    if (!response.data.matches || response.data.matches.length === 0) {
-      console.log('No matches found in API response, using mock data');
-      return generateMockSeasonData(gameweek);
-    }
-    
-    return response.data.matches.map((match, index) => ({
-      id: match.id,
-      homeTeam: match.homeTeam.name,
-      awayTeam: match.awayTeam.name,
-      date: match.utcDate,
-      status: match.status === 'FINISHED' ? 'finished' : 
-              match.status === 'IN_PLAY' ? 'live' : 'upcoming',
-      homeScore: match.score.fullTime.home,
-      awayScore: match.score.fullTime.away,
-      gameweek: match.matchday
-    }));
-  } catch (error) {
-    console.error('API Error Details:', {
-      message: error.message,
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      data: error.response?.data
-    });
-    console.log('Falling back to mock data');
-    return generateMockSeasonData(gameweek);
+// ===== API RESPONSE CACHE =====
+// Cache all matches in memory; refresh every 3 minutes to stay within API rate limits.
+// Football-Data.org free tier: 10 requests/minute. We use ~1 request per refresh cycle.
+const matchCache = {
+  allMatches: null,       // full season data
+  lastFetch: 0,           // timestamp of last successful API call
+  TTL: 3 * 60 * 1000,     // 3 minutes
+  refreshTimer: null
+};
+
+// Raw API fetch – only called by the cache layer, never directly by endpoints
+const _fetchFromAPI = async () => {
+  const apiKey = process.env.FOOTBALL_API_KEY;
+  
+  if (!apiKey || apiKey === 'your-api-key-here') {
+    console.log('[Cache] No API key – using mock data');
+    return generateMockSeasonData();
   }
+  
+  const season = '2025';
+  const url = `https://api.football-data.org/v4/competitions/PL/matches?season=${season}`;
+  
+  console.log('[Cache] Fetching all matches from API...');
+  const response = await axios.get(url, {
+    headers: { 'X-Auth-Token': apiKey },
+    timeout: 15000
+  });
+  
+  if (!response.data.matches || response.data.matches.length === 0) {
+    console.log('[Cache] Empty API response – using mock data');
+    return generateMockSeasonData();
+  }
+  
+  console.log(`[Cache] Got ${response.data.matches.length} matches from API`);
+  return response.data.matches.map(match => ({
+    id: match.id,
+    homeTeam: match.homeTeam.name,
+    awayTeam: match.awayTeam.name,
+    date: match.utcDate,
+    status: match.status === 'FINISHED' ? 'finished' : 
+            match.status === 'IN_PLAY' ? 'live' : 'upcoming',
+    homeScore: match.score.fullTime.home,
+    awayScore: match.score.fullTime.away,
+    gameweek: match.matchday
+  }));
+};
+
+// Refresh cache – called on interval and on first request
+const refreshMatchCache = async () => {
+  try {
+    const data = await _fetchFromAPI();
+    matchCache.allMatches = data;
+    matchCache.lastFetch = Date.now();
+    console.log(`[Cache] Refreshed: ${data.length} matches cached at ${new Date().toISOString()}`);
+  } catch (error) {
+    console.error('[Cache] Refresh failed:', error.message);
+    // Keep stale data if available; fall back to mock if not
+    if (!matchCache.allMatches) {
+      matchCache.allMatches = generateMockSeasonData();
+      matchCache.lastFetch = Date.now();
+    }
+  }
+};
+
+// Start background refresh interval (called once after DB init)
+const startMatchCacheRefresh = () => {
+  // Initial fetch
+  refreshMatchCache();
+  // Periodic refresh every 3 minutes
+  matchCache.refreshTimer = setInterval(refreshMatchCache, matchCache.TTL);
+  console.log('[Cache] Background refresh started (every 3 min)');
+};
+
+// Public function used by all endpoints – always reads from cache
+const fetchPremierLeagueMatches = async (gameweek = null) => {
+  // If cache is empty (first request before interval fires), populate it
+  if (!matchCache.allMatches) {
+    await refreshMatchCache();
+  }
+  
+  const allMatches = matchCache.allMatches || generateMockSeasonData();
+  
+  if (gameweek) {
+    return allMatches.filter(m => m.gameweek === gameweek);
+  }
+  return allMatches;
 };
 
 // Generate mock season data for testing
 const generateMockSeasonData = (gameweek = null) => {
   const teams = [
     'Arsenal', 'Manchester City', 'Liverpool', 'Chelsea', 'Manchester United',
-    'Tottenham', 'Newcastle', 'Brighton', 'Aston Villa', 'West Ham',
-    'Crystal Palace', 'Fulham', 'Wolves', 'Everton', 'Brentford',
-    'Nottingham Forest', 'Luton Town', 'Burnley', 'Sheffield United', 'Bournemouth'
+    'Tottenham', 'Newcastle United', 'Brighton', 'Aston Villa', 'West Ham',
+    'Crystal Palace', 'Fulham', 'Wolverhampton', 'Everton', 'Brentford',
+    'Nottingham Forest', 'Bournemouth', 'Burnley', 'Leeds United', 'Sunderland'
   ];
   
   const allMatches = [];
@@ -241,20 +303,13 @@ const calculateGameweekDeadline = (matches) => {
 // Get matches for specific gameweek or all matches
 app.get('/api/matches', async (req, res) => {
   try {
-    console.log('Matches endpoint called with gameweek:', req.query.gameweek);
     const gameweek = req.query.gameweek ? parseInt(req.query.gameweek) : null;
     const matches = await fetchPremierLeagueMatches(gameweek);
     
-    console.log('Fetched matches count:', matches?.length || 0);
-    
     if (gameweek) {
-      const gameweekMatches = matches.filter(m => m.gameweek === gameweek);
-      const deadline = calculateGameweekDeadline(gameweekMatches);
-      
-      console.log('Gameweek matches:', gameweekMatches.length);
-      
+      const deadline = calculateGameweekDeadline(matches);
       res.json({
-        matches: gameweekMatches,
+        matches,
         gameweek,
         deadline,
         canPredict: new Date() < new Date(deadline)
@@ -309,15 +364,21 @@ app.post('/api/predictions', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Prediction deadline has passed' });
     }
     
-    // Save prediction to database
-    await db.savePrediction(req.userId, matchId, parseInt(homeScore), parseInt(awayScore), isDoubler, gameweek);
-    
-    // Handle doubler logic
+    // Handle doubler logic - only 1 per gameweek
     if (isDoubler) {
+      // Clear ALL doubler flags for this user's predictions in this gameweek first
+      await db.clearDoublerFlags(req.userId, gameweek);
+      // Set the new doubler in the doublers table
       await db.saveDoubler(req.userId, gameweek, matchId);
     }
     
-    res.json({ message: 'Prediction saved successfully' });
+    // Save prediction to database
+    await db.savePrediction(req.userId, matchId, parseInt(homeScore), parseInt(awayScore), isDoubler, gameweek);
+    
+    // Check and award badges
+    const newBadges = await checkAndAwardBadges(req.userId);
+    
+    res.json({ message: 'Prediction saved successfully', newBadges });
   } catch (error) {
     console.error('Prediction submission error:', error);
     res.status(500).json({ error: 'Failed to save prediction' });
@@ -363,7 +424,12 @@ app.get('/api/leaderboard', async (req, res) => {
       for (const match of finishedMatches) {
         const prediction = allPredictions.find(p => p.userId === user.id && p.matchId == match.id);
         if (prediction) {
-          let matchScore = calculateScore(prediction, match);
+          // Create a copy without isDoubler to avoid double-counting
+          // since we check doubler separately below
+          let matchScore = calculatePoints(
+            { homeScore: prediction.homeScore, awayScore: prediction.awayScore, isDoubler: false },
+            match.homeScore, match.awayScore
+          );
           
           // Check if this was a doubler match
           const doubler = await db.getUserDoubler(user.id, match.gameweek);
@@ -409,8 +475,38 @@ app.get('/api/predictions', authenticateToken, async (req, res) => {
 app.get('/api/my-predictions', authenticateToken, async (req, res) => {
   try {
     const userPredictions = await db.getUserPredictions(req.userId);
-    res.json(userPredictions);
+    const user = await db.getUserById(req.userId);
+    
+    // Enrich predictions with match team names
+    const enriched = [];
+    const matchCache = {};
+    
+    for (const pred of userPredictions) {
+      // Fetch matches for this gameweek (cached)
+      const gw = pred.gameweek || 1;
+      if (!matchCache[gw]) {
+        try {
+          matchCache[gw] = await fetchPremierLeagueMatches(gw);
+        } catch (e) {
+          matchCache[gw] = [];
+        }
+      }
+      
+      const match = matchCache[gw].find(m => m.id == pred.matchId);
+      enriched.push({
+        ...pred,
+        homeTeam: match ? match.homeTeam : 'Team A',
+        awayTeam: match ? match.awayTeam : 'Team B',
+        actualHomeScore: match ? match.homeScore : null,
+        actualAwayScore: match ? match.awayScore : null,
+        matchStatus: match ? match.status : 'unknown',
+        username: user ? user.username : 'You'
+      });
+    }
+    
+    res.json(enriched);
   } catch (error) {
+    console.error('My predictions error:', error);
     res.status(500).json({ error: 'Failed to fetch predictions' });
   }
 });
@@ -426,6 +522,67 @@ app.get('/api/doubler/:gameweek', authenticateToken, async (req, res) => {
   }
 });
 
+// ===== VERCEL CRON ENDPOINTS =====
+// These are called by Vercel Cron Jobs (see vercel.json).
+// On local dev, the setInterval-based scheduler handles this instead.
+
+app.get('/api/cron/refresh-cache', async (req, res) => {
+  // Verify cron secret in production
+  if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    await refreshMatchCache();
+    res.json({ ok: true, cached: matchCache.allMatches?.length || 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/cron/notifications', async (req, res) => {
+  if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const allMatches = matchCache.allMatches;
+    if (!allMatches) return res.json({ ok: true, sent: 0 });
+    const now = new Date();
+    let sent = 0;
+
+    // Match start notifications (5 min before kickoff)
+    for (const match of allMatches) {
+      if (notificationState.notifiedMatchIds.has(match.id)) continue;
+      const kickoff = new Date(match.date);
+      const diffMin = (kickoff - now) / 60000;
+      if (diffMin > 0 && diffMin <= 5 && match.status === 'upcoming') {
+        notificationState.notifiedMatchIds.add(match.id);
+        const title = '⚽ Match Starting!';
+        const body = `${match.homeTeam} vs ${match.awayTeam} kicks off in ${Math.ceil(diffMin)} min!`;
+        await sendPushToAll(title, body, '/');
+        io.emit('matchStarting', { matchId: match.id, homeTeam: match.homeTeam, awayTeam: match.awayTeam });
+        sent++;
+      }
+    }
+
+    // Weekly reminder (Wednesday ~10am)
+    const dayOfWeek = now.getDay();
+    const hourOfDay = now.getHours();
+    const daysSince = (now - notificationState.lastWeeklyReminder) / (1000 * 60 * 60 * 24);
+    if (dayOfWeek === 3 && hourOfDay >= 10 && hourOfDay < 11 && daysSince > 5) {
+      notificationState.lastWeeklyReminder = Date.now();
+      const upcomingGw = allMatches.find(m => m.status === 'upcoming');
+      if (upcomingGw) {
+        await sendPushToAll('🏟️ Time to Predict!', `Gameweek ${upcomingGw.gameweek} matches are coming up!`, '/');
+        sent++;
+      }
+    }
+
+    res.json({ ok: true, sent });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Admin endpoint to update match results (for testing)
 app.post('/api/admin/update-match', (req, res) => {
   try {
@@ -434,6 +591,728 @@ app.post('/api/admin/update-match', (req, res) => {
     res.json({ message: 'Match result updated successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update match result' });
+  }
+});
+
+// ===== BADGE DEFINITIONS =====
+const BADGES = {
+  first_prediction: { name: 'First Prediction', icon: 'fas fa-star', description: 'Made your first prediction', color: '#FFD700' },
+  ten_predictions: { name: 'Regular', icon: 'fas fa-fire', description: 'Made 10 predictions', color: '#FF6B35' },
+  fifty_predictions: { name: 'Dedicated', icon: 'fas fa-medal', description: 'Made 50 predictions', color: '#C0C0C0' },
+  hundred_predictions: { name: 'Centurion', icon: 'fas fa-crown', description: 'Made 100 predictions', color: '#FFD700' },
+  perfect_score: { name: 'Perfect Score', icon: 'fas fa-bullseye', description: 'Scored 4/4 on a match', color: '#00FF88' },
+  streak_3: { name: 'Hot Streak', icon: 'fas fa-fire-flame-curved', description: '3 correct results in a row', color: '#FF4500' },
+  streak_5: { name: 'On Fire', icon: 'fas fa-meteor', description: '5 correct results in a row', color: '#FF0000' },
+  streak_10: { name: 'Unstoppable', icon: 'fas fa-dragon', description: '10 correct results in a row', color: '#8B0000' },
+  weekly_winner: { name: 'Weekly Champion', icon: 'fas fa-trophy', description: 'Won a gameweek', color: '#FFD700' },
+  league_creator: { name: 'Leader', icon: 'fas fa-users', description: 'Created a league', color: '#4169E1' },
+  top_3_finish: { name: 'Podium Finish', icon: 'fas fa-award', description: 'Finished top 3 in a gameweek', color: '#CD7F32' },
+  doubler_master: { name: 'Doubler Master', icon: 'fas fa-dice-d20', description: 'Scored 8/8 on a doubler match', color: '#9B59B6' }
+};
+
+// Helper to generate random invite code
+function generateInviteCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+// Helper to check and award badges after actions
+async function checkAndAwardBadges(userId) {
+  const awarded = [];
+  try {
+    const predCount = await db.getUserPredictionCount(userId);
+    const streak = await db.getUserStreak(userId);
+
+    if (predCount >= 1) { const r = await db.awardBadge(userId, 'first_prediction'); if (r.awarded) awarded.push('first_prediction'); }
+    if (predCount >= 10) { const r = await db.awardBadge(userId, 'ten_predictions'); if (r.awarded) awarded.push('ten_predictions'); }
+    if (predCount >= 50) { const r = await db.awardBadge(userId, 'fifty_predictions'); if (r.awarded) awarded.push('fifty_predictions'); }
+    if (predCount >= 100) { const r = await db.awardBadge(userId, 'hundred_predictions'); if (r.awarded) awarded.push('hundred_predictions'); }
+    if (streak.current_streak >= 3) { const r = await db.awardBadge(userId, 'streak_3'); if (r.awarded) awarded.push('streak_3'); }
+    if (streak.current_streak >= 5) { const r = await db.awardBadge(userId, 'streak_5'); if (r.awarded) awarded.push('streak_5'); }
+    if (streak.current_streak >= 10) { const r = await db.awardBadge(userId, 'streak_10'); if (r.awarded) awarded.push('streak_10'); }
+  } catch (e) {
+    console.error('Badge check error:', e);
+  }
+  return awarded;
+}
+
+// ===== LEAGUE ENDPOINTS =====
+
+// Create a league
+app.post('/api/leagues', authenticateToken, async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || name.trim().length < 2) {
+      return res.status(400).json({ error: 'League name must be at least 2 characters' });
+    }
+    const inviteCode = generateInviteCode();
+    const league = await db.createLeague(name.trim(), inviteCode, req.userId);
+    // Award league creator badge
+    await db.awardBadge(req.userId, 'league_creator');
+    res.json(league);
+  } catch (error) {
+    console.error('Create league error:', error);
+    res.status(500).json({ error: 'Failed to create league' });
+  }
+});
+
+// Join a league
+app.post('/api/leagues/join', authenticateToken, async (req, res) => {
+  try {
+    const { inviteCode } = req.body;
+    if (!inviteCode) return res.status(400).json({ error: 'Invite code required' });
+    const result = await db.joinLeague(inviteCode.toUpperCase().trim(), req.userId);
+    res.json(result);
+  } catch (error) {
+    console.error('Join league error:', error);
+    res.status(400).json({ error: error.message || 'Failed to join league' });
+  }
+});
+
+// Get user's leagues
+app.get('/api/leagues', authenticateToken, async (req, res) => {
+  try {
+    const leagues = await db.getUserLeagues(req.userId);
+    res.json(leagues);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch leagues' });
+  }
+});
+
+// Get league leaderboard
+app.get('/api/leagues/:leagueId/leaderboard', authenticateToken, async (req, res) => {
+  try {
+    const league = await db.getLeagueById(parseInt(req.params.leagueId));
+    if (!league) return res.status(404).json({ error: 'League not found' });
+    const leaderboard = await db.getLeagueLeaderboard(league.id);
+    res.json({ league: { id: league.id, name: league.name, invite_code: league.invite_code }, leaderboard });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch league leaderboard' });
+  }
+});
+
+// ===== STREAK ENDPOINT =====
+
+app.get('/api/streak', authenticateToken, async (req, res) => {
+  try {
+    const streak = await db.getUserStreak(req.userId);
+    res.json(streak);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch streak' });
+  }
+});
+
+// ===== BADGES ENDPOINTS =====
+
+// Get all badge definitions
+app.get('/api/badges/all', (req, res) => {
+  res.json(BADGES);
+});
+
+// Get user's earned badges
+app.get('/api/badges', authenticateToken, async (req, res) => {
+  try {
+    const earned = await db.getUserBadges(req.userId);
+    const badgesWithInfo = earned.map(b => ({
+      ...BADGES[b.badge_key],
+      key: b.badge_key,
+      earned_at: b.earned_at
+    }));
+    res.json(badgesWithInfo);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch badges' });
+  }
+});
+
+// Get all achievements with earned/unearned status for the user
+app.get('/api/achievements', authenticateToken, async (req, res) => {
+  try {
+    const earned = await db.getUserBadges(req.userId);
+    const earnedMap = {};
+    earned.forEach(b => { earnedMap[b.badge_key] = b.earned_at; });
+    
+    const achievements = Object.entries(BADGES).map(([key, badge]) => ({
+      key,
+      ...badge,
+      earned: !!earnedMap[key],
+      earned_at: earnedMap[key] || null
+    }));
+    
+    res.json(achievements);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch achievements' });
+  }
+});
+
+// ===== WEEKLY WINNER ENDPOINTS =====
+
+app.get('/api/weekly-winner/:gameweek', async (req, res) => {
+  try {
+    const winner = await db.getWeeklyWinner(parseInt(req.params.gameweek));
+    res.json(winner || null);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch weekly winner' });
+  }
+});
+
+app.get('/api/weekly-winners', async (req, res) => {
+  try {
+    const winners = await db.getAllWeeklyWinners();
+    res.json(winners);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch weekly winners' });
+  }
+});
+
+// ===== SHARE CARD ENDPOINT =====
+
+app.get('/api/share-card', authenticateToken, async (req, res) => {
+  try {
+    const user = await db.getUserById(req.userId);
+    const streak = await db.getUserStreak(req.userId);
+    const badges = await db.getUserBadges(req.userId);
+    const predCount = await db.getUserPredictionCount(req.userId);
+    const allUsers = await db.getAllUsers();
+    const rank = allUsers.findIndex(u => u.id === req.userId) + 1;
+
+    res.json({
+      username: user.username,
+      score: user.score,
+      rank,
+      totalPlayers: allUsers.length,
+      currentStreak: streak.current_streak,
+      bestStreak: streak.best_streak,
+      predictions: predCount,
+      badgeCount: badges.length
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to generate share card data' });
+  }
+});
+
+// ===== USER PROFILE / STATS ENDPOINT =====
+
+app.get('/api/profile', authenticateToken, async (req, res) => {
+  try {
+    const user = await db.getUserById(req.userId);
+    const streak = await db.getUserStreak(req.userId);
+    const badges = await db.getUserBadges(req.userId);
+    const predCount = await db.getUserPredictionCount(req.userId);
+    const leagues = await db.getUserLeagues(req.userId);
+    const allUsers = await db.getAllUsers();
+    const rank = allUsers.findIndex(u => u.id === req.userId) + 1;
+
+    const badgesWithInfo = badges.map(b => ({
+      ...BADGES[b.badge_key],
+      key: b.badge_key,
+      earned_at: b.earned_at
+    }));
+
+    res.json({
+      username: user.username,
+      score: user.score,
+      rank,
+      totalPlayers: allUsers.length,
+      currentStreak: streak.current_streak,
+      bestStreak: streak.best_streak,
+      predictions: predCount,
+      badges: badgesWithInfo,
+      leagues: leagues.length
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// ===== HEAD-TO-HEAD ENDPOINTS =====
+
+// Search users for H2H challenge
+app.get('/api/users/search', authenticateToken, async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.length < 2) return res.json([]);
+    const users = await db.searchUsers(q);
+    res.json(users.filter(u => u.id !== req.userId));
+  } catch (error) {
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+// Create H2H challenge
+app.post('/api/h2h/challenge', authenticateToken, async (req, res) => {
+  try {
+    const { opponentId, gameweek } = req.body;
+    if (!opponentId || !gameweek) return res.status(400).json({ error: 'Opponent and gameweek required' });
+    if (opponentId === req.userId) return res.status(400).json({ error: 'Cannot challenge yourself' });
+
+    const result = await db.createH2HChallenge(req.userId, opponentId, gameweek);
+    const challenger = await db.getUserById(req.userId);
+
+    // Notify opponent
+    await db.createNotification(opponentId, 'h2h_challenge', 'New Challenge!',
+      `${challenger.username} challenged you for Gameweek ${gameweek}!`,
+      { challengeId: result.id, gameweek });
+
+    // Emit real-time notification
+    io.emit('notification', { userId: opponentId, type: 'h2h_challenge' });
+    // Send push notification
+    sendPushToUser(opponentId, 'New Challenge!', `${challenger.username} challenged you for Gameweek ${gameweek}!`, '/');
+
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'Failed to create challenge' });
+  }
+});
+
+// Accept H2H challenge
+app.post('/api/h2h/:id/accept', authenticateToken, async (req, res) => {
+  try {
+    await db.acceptH2HChallenge(parseInt(req.params.id), req.userId);
+    const challenge = await db.getH2HChallenge(parseInt(req.params.id));
+
+    // Notify challenger
+    await db.createNotification(challenge.challenger_id, 'h2h_accepted', 'Challenge Accepted!',
+      `${challenge.opponent_name} accepted your GW${challenge.gameweek} challenge!`,
+      { challengeId: challenge.id });
+    io.emit('notification', { userId: challenge.challenger_id, type: 'h2h_accepted' });
+    // Send push notification
+    sendPushToUser(challenge.challenger_id, 'Challenge Accepted!', `${challenge.opponent_name} accepted your GW${challenge.gameweek} challenge!`, '/');
+
+    res.json({ message: 'Challenge accepted' });
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'Failed to accept challenge' });
+  }
+});
+
+// Decline H2H challenge
+app.post('/api/h2h/:id/decline', authenticateToken, async (req, res) => {
+  try {
+    await db.declineH2HChallenge(parseInt(req.params.id), req.userId);
+    res.json({ message: 'Challenge declined' });
+  } catch (error) {
+    res.status(400).json({ error: 'Failed to decline challenge' });
+  }
+});
+
+// Get user's H2H challenges
+app.get('/api/h2h', authenticateToken, async (req, res) => {
+  try {
+    const challenges = await db.getUserH2HChallenges(req.userId);
+    res.json(challenges);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch challenges' });
+  }
+});
+
+// Get single H2H challenge detail
+app.get('/api/h2h/:id', authenticateToken, async (req, res) => {
+  try {
+    const challenge = await db.getH2HChallenge(parseInt(req.params.id));
+    if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
+
+    // Get both players' predictions for the gameweek
+    const challengerPreds = await db.getUserPredictions(challenge.challenger_id);
+    const opponentPreds = await db.getUserPredictions(challenge.opponent_id);
+
+    const gwChallengerPreds = challengerPreds.filter(p => p.gameweek === challenge.gameweek);
+    const gwOpponentPreds = opponentPreds.filter(p => p.gameweek === challenge.gameweek);
+
+    res.json({
+      ...challenge,
+      challengerPredictions: gwChallengerPreds,
+      opponentPredictions: gwOpponentPreds
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch challenge' });
+  }
+});
+
+// ===== NOTIFICATION ENDPOINTS =====
+
+app.get('/api/notifications', authenticateToken, async (req, res) => {
+  try {
+    const notifications = await db.getUserNotifications(req.userId);
+    const unread = await db.getUnreadNotificationCount(req.userId);
+    res.json({ notifications, unreadCount: unread });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch notifications' });
+  }
+});
+
+app.post('/api/notifications/read', authenticateToken, async (req, res) => {
+  try {
+    await db.markNotificationsRead(req.userId);
+    res.json({ message: 'All notifications marked as read' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to mark notifications' });
+  }
+});
+
+app.post('/api/notifications/:id/read', authenticateToken, async (req, res) => {
+  try {
+    await db.markNotificationRead(parseInt(req.params.id), req.userId);
+    res.json({ message: 'Notification marked as read' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to mark notification' });
+  }
+});
+
+// ===== PREDICTION REVEAL ENDPOINT =====
+
+app.get('/api/predictions/reveal/:gameweek', async (req, res) => {
+  try {
+    const gameweek = parseInt(req.params.gameweek);
+
+    // Only reveal predictions if the deadline has passed
+    const matches = await fetchPremierLeagueMatches(gameweek);
+    const gameweekMatches = matches.filter(m => m.gameweek === gameweek);
+    const deadline = calculateGameweekDeadline(gameweekMatches);
+
+    if (new Date() < new Date(deadline)) {
+      return res.status(403).json({ error: 'Predictions are hidden until the deadline passes', locked: true });
+    }
+
+    const predictions = await db.getGameweekPredictions(gameweek);
+
+    // Group predictions by match
+    const byMatch = {};
+    predictions.forEach(p => {
+      if (!byMatch[p.matchId]) byMatch[p.matchId] = [];
+      byMatch[p.matchId].push(p);
+    });
+
+    res.json({ gameweek, predictions: byMatch, matches: gameweekMatches });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch predictions' });
+  }
+});
+
+// ===== SEASON STATS ENDPOINT =====
+
+app.get('/api/season-stats', authenticateToken, async (req, res) => {
+  try {
+    const allMatches = await fetchPremierLeagueMatches();
+    const finishedMatches = allMatches.filter(m => m.status === 'finished');
+    const userPredictions = await db.getUserPredictions(req.userId);
+    const allUsers = await db.getAllUsers();
+    const streak = await db.getUserStreak(req.userId);
+    const user = await db.getUserById(req.userId);
+
+    let totalPoints = 0;
+    let perfectScores = 0;
+    let correctResults = 0;
+    let correctScorelines = 0;
+    let totalPredicted = 0;
+    const gameweekPoints = {};
+
+    for (const match of finishedMatches) {
+      const pred = userPredictions.find(p => p.matchId == match.id);
+      if (!pred) continue;
+      totalPredicted++;
+
+      let pts = 0;
+      const predHome = pred.homeScore;
+      const predAway = pred.awayScore;
+      const actHome = match.homeScore;
+      const actAway = match.awayScore;
+
+      if (predHome === actHome) pts++;
+      if (predAway === actAway) pts++;
+      const predDiff = predHome - predAway;
+      const actDiff = actHome - actAway;
+      if (predDiff === actDiff) pts++;
+      const predResult = predHome > predAway ? 'H' : predHome < predAway ? 'A' : 'D';
+      const actResult = actHome > actAway ? 'H' : actHome < actAway ? 'A' : 'D';
+      if (predResult === actResult) { pts++; correctResults++; }
+      if (predHome === actHome && predAway === actAway) correctScorelines++;
+      if (pts === 4) perfectScores++;
+
+      // Check doubler
+      const doubler = await db.getUserDoubler(req.userId, match.gameweek);
+      if (doubler && doubler.matchId == match.id) pts *= 2;
+
+      totalPoints += pts;
+
+      if (!gameweekPoints[match.gameweek]) gameweekPoints[match.gameweek] = { points: 0, matches: 0 };
+      gameweekPoints[match.gameweek].points += pts;
+      gameweekPoints[match.gameweek].matches++;
+    }
+
+    // Best and worst gameweeks
+    const gwEntries = Object.entries(gameweekPoints).map(([gw, data]) => ({ gameweek: parseInt(gw), ...data }));
+    gwEntries.sort((a, b) => b.points - a.points);
+    const bestGW = gwEntries[0] || null;
+    const worstGW = gwEntries[gwEntries.length - 1] || null;
+
+    // Accuracy
+    const maxPossible = totalPredicted * 4;
+    const accuracy = maxPossible > 0 ? ((totalPoints / maxPossible) * 100).toFixed(1) : 0;
+
+    // Rank
+    const rank = allUsers.findIndex(u => u.id === req.userId) + 1;
+
+    // Average points per gameweek
+    const gwCount = gwEntries.length;
+    const avgPointsPerGW = gwCount > 0 ? (totalPoints / gwCount).toFixed(1) : 0;
+
+    res.json({
+      username: user.username,
+      totalPoints,
+      rank,
+      totalPlayers: allUsers.length,
+      accuracy: parseFloat(accuracy),
+      perfectScores,
+      correctResults,
+      correctScorelines,
+      totalPredicted,
+      totalFinishedMatches: finishedMatches.length,
+      currentStreak: streak.current_streak,
+      bestStreak: streak.best_streak,
+      bestGameweek: bestGW,
+      worstGameweek: worstGW,
+      avgPointsPerGW: parseFloat(avgPointsPerGW),
+      gameweekHistory: gwEntries.sort((a, b) => a.gameweek - b.gameweek)
+    });
+  } catch (error) {
+    console.error('Season stats error:', error);
+    res.status(500).json({ error: 'Failed to fetch season stats' });
+  }
+});
+
+// ===== PUSH NOTIFICATION ENDPOINTS =====
+
+const webpush = require('web-push');
+
+// Configure web-push with VAPID keys
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+const vapidEmail = process.env.VAPID_EMAIL || 'mailto:admin@plpredictions.com';
+
+if (vapidPublicKey && vapidPrivateKey) {
+  webpush.setVapidDetails(vapidEmail, vapidPublicKey, vapidPrivateKey);
+  console.log('Web Push configured with VAPID keys');
+}
+
+// Get VAPID public key for frontend
+app.get('/api/push/vapid-public-key', (req, res) => {
+  if (!vapidPublicKey) {
+    return res.status(500).json({ error: 'Push notifications not configured' });
+  }
+  res.json({ publicKey: vapidPublicKey });
+});
+
+// Subscribe to push notifications
+app.post('/api/push/subscribe', authenticateToken, async (req, res) => {
+  try {
+    const { subscription } = req.body;
+    if (!subscription || !subscription.endpoint || !subscription.keys) {
+      return res.status(400).json({ error: 'Invalid subscription' });
+    }
+    await db.savePushSubscription(
+      req.userId,
+      subscription.endpoint,
+      subscription.keys.p256dh,
+      subscription.keys.auth
+    );
+    res.json({ message: 'Subscribed to push notifications' });
+  } catch (error) {
+    console.error('Push subscribe error:', error);
+    res.status(500).json({ error: 'Failed to subscribe' });
+  }
+});
+
+// Unsubscribe from push notifications
+app.post('/api/push/unsubscribe', authenticateToken, async (req, res) => {
+  try {
+    const { endpoint } = req.body;
+    if (endpoint) {
+      await db.removePushSubscription(endpoint);
+    }
+    res.json({ message: 'Unsubscribed from push notifications' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to unsubscribe' });
+  }
+});
+
+// Send push notification to a specific user
+async function sendPushToUser(userId, title, body, url) {
+  if (!vapidPublicKey || !vapidPrivateKey) return;
+  try {
+    const subscriptions = await db.getUserPushSubscriptions(userId);
+    const payload = JSON.stringify({ title, body, url: url || '/' });
+    for (const sub of subscriptions) {
+      try {
+        await webpush.sendNotification({
+          endpoint: sub.endpoint,
+          keys: { p256dh: sub.keys_p256dh, auth: sub.keys_auth }
+        }, payload);
+      } catch (err) {
+        if (err.statusCode === 404 || err.statusCode === 410) {
+          await db.removePushSubscription(sub.endpoint);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Push notification error:', e);
+  }
+}
+
+// Send push to all users (e.g., deadline reminders)
+async function sendPushToAll(title, body, url) {
+  if (!vapidPublicKey || !vapidPrivateKey) return;
+  try {
+    const subscriptions = await db.getAllPushSubscriptions();
+    const payload = JSON.stringify({ title, body, url: url || '/' });
+    for (const sub of subscriptions) {
+      try {
+        await webpush.sendNotification({
+          endpoint: sub.endpoint,
+          keys: { p256dh: sub.keys_p256dh, auth: sub.keys_auth }
+        }, payload);
+      } catch (err) {
+        if (err.statusCode === 404 || err.statusCode === 410) {
+          await db.removePushSubscription(sub.endpoint);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Broadcast push error:', e);
+  }
+}
+
+// Admin endpoint to test push notifications
+app.post('/api/push/test', authenticateToken, async (req, res) => {
+  try {
+    await sendPushToUser(req.userId, 'Test Notification', 'Push notifications are working!', '/');
+    res.json({ message: 'Test notification sent' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to send test notification' });
+  }
+});
+
+// ===== PRO SUBSCRIPTION ENDPOINTS =====
+
+// Get subscription status
+app.get('/api/subscription/status', authenticateToken, async (req, res) => {
+  try {
+    const subscription = await db.getUserSubscription(req.userId);
+    if (subscription && subscription.status === 'active') {
+      const isExpired = subscription.expires_at && new Date(subscription.expires_at) < new Date();
+      if (isExpired) {
+        await db.updateSubscriptionStatus(req.userId, 'expired');
+        return res.json({ isPro: false });
+      }
+      return res.json({
+        isPro: true,
+        plan: subscription.plan,
+        subscribedAt: subscription.created_at,
+        expiresAt: subscription.expires_at
+      });
+    }
+    res.json({ isPro: false });
+  } catch (error) {
+    console.error('Subscription status error:', error);
+    res.json({ isPro: false });
+  }
+});
+
+// Create checkout session (Stripe or demo mode)
+app.post('/api/subscription/create-checkout', authenticateToken, async (req, res) => {
+  try {
+    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    
+    if (stripeKey && stripeKey !== 'your-stripe-key-here') {
+      // Real Stripe integration
+      const stripe = require('stripe')(stripeKey);
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [{
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: 'PL Predictions Pro',
+              description: 'Monthly Pro subscription with exclusive features'
+            },
+            unit_amount: 300, // $3.00
+            recurring: { interval: 'month' }
+          },
+          quantity: 1
+        }],
+        mode: 'subscription',
+        success_url: `${req.protocol}://${req.get('host')}/?pro=success`,
+        cancel_url: `${req.protocol}://${req.get('host')}/?pro=cancel`,
+        client_reference_id: String(req.userId)
+      });
+      return res.json({ url: session.url });
+    }
+    
+    // Demo mode - activate pro immediately for testing
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + 1);
+    await db.createOrUpdateSubscription(req.userId, 'pro_monthly', 'active', 'demo', expiresAt.toISOString());
+    res.json({ message: 'Pro activated! (Demo mode - configure STRIPE_SECRET_KEY for real payments)' });
+  } catch (error) {
+    console.error('Checkout error:', error);
+    res.status(500).json({ error: 'Failed to create checkout session' });
+  }
+});
+
+// Stripe webhook for payment confirmation
+app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  try {
+    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!stripeKey || !webhookSecret) return res.status(400).send('Webhook not configured');
+    
+    const stripe = require('stripe')(stripeKey);
+    const sig = req.headers['stripe-signature'];
+    const event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+    
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const userId = parseInt(session.client_reference_id);
+      const expiresAt = new Date();
+      expiresAt.setMonth(expiresAt.getMonth() + 1);
+      await db.createOrUpdateSubscription(userId, 'pro_monthly', 'active', session.subscription, expiresAt.toISOString());
+    } else if (event.type === 'customer.subscription.deleted') {
+      const subscription = event.data.object;
+      // Find user by stripe subscription ID and deactivate
+      await db.deactivateSubscriptionByStripeId(subscription.id);
+    }
+    
+    res.json({ received: true });
+  } catch (error) {
+    console.error('Webhook error:', error);
+    res.status(400).send('Webhook Error');
+  }
+});
+
+// Manage subscription
+app.post('/api/subscription/manage', authenticateToken, async (req, res) => {
+  try {
+    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    const subscription = await db.getUserSubscription(req.userId);
+    
+    if (stripeKey && subscription && subscription.stripe_subscription_id && subscription.stripe_subscription_id !== 'demo') {
+      const stripe = require('stripe')(stripeKey);
+      const portalSession = await stripe.billingPortal.sessions.create({
+        customer: subscription.stripe_customer_id,
+        return_url: `${req.protocol}://${req.get('host')}/`
+      });
+      return res.json({ url: portalSession.url });
+    }
+    
+    // Demo mode - just cancel
+    if (subscription) {
+      await db.updateSubscriptionStatus(req.userId, 'cancelled');
+      return res.json({ message: 'Subscription cancelled (demo mode)' });
+    }
+    
+    res.json({ message: 'No active subscription found' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to manage subscription' });
   }
 });
 
@@ -516,31 +1395,125 @@ const updateMatchResults = (matchId, homeScore, awayScore) => {
   });
 };
 
+// ===== NOTIFICATION SCHEDULER =====
+// Checks every 60 seconds for matches about to start, and sends weekly reminders.
+const notificationState = {
+  notifiedMatchIds: new Set(),  // track which match-start notifications already sent
+  lastWeeklyReminder: 0         // timestamp of last weekly reminder
+};
+
+const startNotificationScheduler = () => {
+  // Check every 60 seconds
+  setInterval(async () => {
+    try {
+      const allMatches = matchCache.allMatches;
+      if (!allMatches) return;
+      const now = new Date();
+      
+      // --- Match start notifications (5 min before kickoff) ---
+      for (const match of allMatches) {
+        if (notificationState.notifiedMatchIds.has(match.id)) continue;
+        const kickoff = new Date(match.date);
+        const diffMin = (kickoff - now) / 60000;
+        // Notify if match starts in the next 5 minutes
+        if (diffMin > 0 && diffMin <= 5 && match.status === 'upcoming') {
+          notificationState.notifiedMatchIds.add(match.id);
+          const title = '⚽ Match Starting!';
+          const body = `${match.homeTeam} vs ${match.awayTeam} kicks off in ${Math.ceil(diffMin)} min!`;
+          const payload = JSON.stringify({
+            title, body, url: '/',
+            sound: 'football',     // tells service worker to play sound
+            tag: `match-${match.id}`
+          });
+          // Send to all subscribed users
+          if (vapidPublicKey && vapidPrivateKey) {
+            const subs = await db.getAllPushSubscriptions();
+            for (const sub of subs) {
+              try {
+                await webpush.sendNotification({
+                  endpoint: sub.endpoint,
+                  keys: { p256dh: sub.keys_p256dh, auth: sub.keys_auth }
+                }, payload);
+              } catch (err) {
+                if (err.statusCode === 404 || err.statusCode === 410) {
+                  await db.removePushSubscription(sub.endpoint);
+                }
+              }
+            }
+          }
+          // Also emit via socket for in-app notification
+          io.emit('matchStarting', { matchId: match.id, homeTeam: match.homeTeam, awayTeam: match.awayTeam });
+          console.log(`[Notify] Match starting: ${match.homeTeam} vs ${match.awayTeam}`);
+        }
+      }
+      
+      // --- Weekly prediction reminder (once per day, on Monday/Tuesday/Wednesday) ---
+      const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon...
+      const hourOfDay = now.getHours();
+      const daysSinceLastReminder = (now - notificationState.lastWeeklyReminder) / (1000 * 60 * 60 * 24);
+      
+      // Send reminder on Wednesday at ~10am if not sent in last 5 days
+      if (dayOfWeek === 3 && hourOfDay >= 10 && hourOfDay < 11 && daysSinceLastReminder > 5) {
+        notificationState.lastWeeklyReminder = Date.now();
+        // Find next upcoming gameweek
+        const upcomingGw = allMatches.find(m => m.status === 'upcoming');
+        if (upcomingGw) {
+          const title = '🏟️ Time to Predict!';
+          const body = `Gameweek ${upcomingGw.gameweek} matches are coming up. Don't forget to submit your predictions!`;
+          await sendPushToAll(title, body, '/');
+          console.log(`[Notify] Weekly reminder sent for GW${upcomingGw.gameweek}`);
+        }
+      }
+    } catch (err) {
+      console.error('[Notify] Scheduler error:', err.message);
+    }
+  }, 60 * 1000); // every 60 seconds
+  console.log('[Notify] Notification scheduler started');
+};
+
 const PORT = process.env.PORT || 3000;
+const IS_VERCEL = !!process.env.VERCEL;
 
-// Start server immediately for healthcheck, initialize DB in background
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Health check endpoint ready at /`);
-  
-  // Initialize database in background after server starts
-  db.initDatabase()
-    .then(() => {
-      dbReady = true;
-      console.log('Database initialized successfully');
-      console.log(`Full app ready for connections`);
-    })
-    .catch(error => {
-      console.error('Database initialization failed:', error);
-      dbReady = false;
-      // Don't exit - healthcheck can still pass
-    });
-});
+// Initialize DB + background tasks
+async function initApp() {
+  try {
+    await db.initDatabase();
+    dbReady = true;
+    console.log('Database initialized successfully');
+    
+    // On Vercel, cron endpoints handle cache + notifications via HTTP.
+    // On local/Railway, use setInterval-based schedulers.
+    if (!IS_VERCEL) {
+      startMatchCacheRefresh();
+      startNotificationScheduler();
+    }
+    
+    console.log(`Full app ready for connections`);
+  } catch (error) {
+    console.error('Database initialization failed:', error);
+    dbReady = false;
+  }
+}
 
-// Graceful shutdown
+if (!IS_VERCEL) {
+  // Local / Railway: start HTTP server normally
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Health check endpoint ready at /`);
+    initApp();
+  });
+} else {
+  // Vercel serverless: init DB eagerly, export app for @vercel/node
+  initApp();
+}
+
+// Graceful shutdown (local only)
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
   server.close(() => {
     console.log('Process terminated');
   });
 });
+
+// Export for Vercel serverless
+module.exports = app;
