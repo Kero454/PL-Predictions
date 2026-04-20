@@ -563,12 +563,41 @@ body {
     color: #666;
 }
 
+/* Season prize banner */
+.season-prize-banner {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border: 1px solid #FFD700;
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: #fff;
+    font-size: 0.9rem;
+}
+
+.season-prize-banner i {
+    color: #FFD700;
+    font-size: 1.3rem;
+    flex-shrink: 0;
+}
+
+.season-prize-banner em {
+    color: #FFD700;
+    font-style: normal;
+    font-weight: 600;
+}
+
 /* Leaderboard */
 .leaderboard-list {
     background: white;
     border-radius: 16px;
-    overflow: hidden;
+    overflow: visible;
     box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    max-height: 70vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .leaderboard-item {
@@ -577,6 +606,29 @@ body {
     align-items: center;
     padding: 1rem 1.5rem;
     border-bottom: 1px solid #e9ecef;
+    min-height: 56px;
+}
+
+.btn-cancel-doubler {
+    background: rgba(255, 0, 0, 0.15);
+    border: 1px solid #ff4444;
+    color: #ff4444;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 0.7rem;
+    margin-left: 8px;
+    transition: background 0.2s;
+}
+
+.btn-cancel-doubler:hover {
+    background: rgba(255, 0, 0, 0.3);
 }
 
 .leaderboard-item:last-child {
@@ -1180,6 +1232,31 @@ body {
     }
     
     /* Better leaderboard display */
+    .leaderboard-list {
+        border-radius: 12px;
+        max-height: 60vh;
+    }
+
+    .leaderboard-item {
+        padding: 0.75rem 1rem;
+        min-height: 48px;
+    }
+
+    .player-rank {
+        width: 26px;
+        height: 26px;
+        font-size: 0.8rem;
+    }
+
+    .player-name {
+        font-size: 0.9rem;
+    }
+
+    .player-score {
+        font-size: 0.85rem;
+        white-space: nowrap;
+    }
+
     .leaderboard-table {
         font-size: 0.9rem;
     }
@@ -1187,6 +1264,18 @@ body {
     .leaderboard-table th,
     .leaderboard-table td {
         padding: 0.5rem 0.25rem;
+    }
+
+    /* Section headers on mobile */
+    .section-header {
+        flex-direction: column;
+        gap: 0.75rem;
+        align-items: flex-start;
+        margin-bottom: 1rem;
+    }
+
+    .section-header h3 {
+        font-size: 1.2rem;
     }
     
     /* Optimize modals for mobile */

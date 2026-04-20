@@ -290,21 +290,23 @@ const updateUserStreak = async (userId, currentStreak, bestStreak, lastCorrectGa
 // ===== BADGE OPERATIONS =====
 
 const awardBadge = async (userId, badgeKey) => {
+  // First check if badge already exists
+  const { data: existing } = await supabase
+    .from('user_badges')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('badge_key', badgeKey)
+    .maybeSingle();
+  
+  if (existing) return { awarded: false };
+
   const { error } = await supabase
     .from('user_badges')
-    .upsert(
-      { user_id: userId, badge_key: badgeKey },
-      { onConflict: 'user_id,badge_key', ignoreDuplicates: true }
-    );
-  // If duplicate, it's ignored — check if it was actually inserted
+    .insert({ user_id: userId, badge_key: badgeKey });
+  
+  if (error && error.code === '23505') return { awarded: false }; // unique violation
   if (error) throw error;
-  // Check if badge already existed
-  const { count } = await supabase
-    .from('user_badges')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .eq('badge_key', badgeKey);
-  return { awarded: true }; // Supabase upsert with ignoreDuplicates doesn't error on dupe
+  return { awarded: true };
 };
 
 const getUserBadges = async (userId) => {

@@ -522,6 +522,21 @@ app.get('/api/doubler/:gameweek', authenticateToken, async (req, res) => {
   }
 });
 
+// Cancel doubler for a specific gameweek
+app.delete('/api/doubler/:gameweek', authenticateToken, async (req, res) => {
+  try {
+    const gameweek = parseInt(req.params.gameweek);
+    // Remove doubler flags from all predictions in this gameweek
+    await db.clearDoublerFlags(req.userId, gameweek);
+    // Remove the doubler record itself
+    await db.saveDoubler(req.userId, gameweek, '');
+    res.json({ message: 'Doubler cancelled' });
+  } catch (error) {
+    console.error('Cancel doubler error:', error);
+    res.status(500).json({ error: 'Failed to cancel doubler' });
+  }
+});
+
 // ===== VERCEL CRON ENDPOINTS =====
 // These are called by Vercel Cron Jobs (see vercel.json).
 // On local dev, the setInterval-based scheduler handles this instead.
@@ -596,18 +611,43 @@ app.post('/api/admin/update-match', (req, res) => {
 
 // ===== BADGE DEFINITIONS =====
 const BADGES = {
+  // Prediction milestones (season has 380 matches = 38 GW x 10 matches)
   first_prediction: { name: 'First Prediction', icon: 'fas fa-star', description: 'Made your first prediction', color: '#FFD700' },
-  ten_predictions: { name: 'Regular', icon: 'fas fa-fire', description: 'Made 10 predictions', color: '#FF6B35' },
+  ten_predictions: { name: 'Getting Started', icon: 'fas fa-fire', description: 'Made 10 predictions', color: '#FF6B35' },
   fifty_predictions: { name: 'Dedicated', icon: 'fas fa-medal', description: 'Made 50 predictions', color: '#C0C0C0' },
   hundred_predictions: { name: 'Centurion', icon: 'fas fa-crown', description: 'Made 100 predictions', color: '#FFD700' },
+  two_hundred_predictions: { name: 'Committed', icon: 'fas fa-shield-halved', description: 'Made 200 predictions', color: '#4169E1' },
+  three_hundred_predictions: { name: 'Iron Will', icon: 'fas fa-gem', description: 'Made 300 predictions', color: '#E91E63' },
+  full_season: { name: 'Full Season', icon: 'fas fa-calendar-check', description: 'Predicted all 380 matches in a season', color: '#00BCD4' },
+  // Gameweek participation
+  full_gameweek: { name: 'Full Card', icon: 'fas fa-clipboard-check', description: 'Predicted all 10 matches in a gameweek', color: '#4CAF50' },
+  ten_full_gameweeks: { name: 'Consistent', icon: 'fas fa-list-check', description: 'Predicted all matches in 10 gameweeks', color: '#2196F3' },
+  twenty_full_gameweeks: { name: 'Machine', icon: 'fas fa-robot', description: 'Predicted all matches in 20 gameweeks', color: '#9C27B0' },
+  // Accuracy badges
   perfect_score: { name: 'Perfect Score', icon: 'fas fa-bullseye', description: 'Scored 4/4 on a match', color: '#00FF88' },
+  five_perfect: { name: 'Sharpshooter', icon: 'fas fa-crosshairs', description: 'Got 5 perfect scores', color: '#FF5722' },
+  ten_perfect: { name: 'Oracle', icon: 'fas fa-eye', description: 'Got 10 perfect scores', color: '#673AB7' },
+  // Streaks
   streak_3: { name: 'Hot Streak', icon: 'fas fa-fire-flame-curved', description: '3 correct results in a row', color: '#FF4500' },
   streak_5: { name: 'On Fire', icon: 'fas fa-meteor', description: '5 correct results in a row', color: '#FF0000' },
   streak_10: { name: 'Unstoppable', icon: 'fas fa-dragon', description: '10 correct results in a row', color: '#8B0000' },
+  streak_20: { name: 'Legendary', icon: 'fas fa-hat-wizard', description: '20 correct results in a row', color: '#FFD700' },
+  // Doubler badges
+  doubler_master: { name: 'Doubler Master', icon: 'fas fa-dice-d20', description: 'Scored 8/8 on a doubler match', color: '#9B59B6' },
+  doubler_streak_3: { name: 'Double Trouble', icon: 'fas fa-bolt-lightning', description: 'Won 3 doublers in a row', color: '#FF9800' },
+  // Social & competitive
   weekly_winner: { name: 'Weekly Champion', icon: 'fas fa-trophy', description: 'Won a gameweek', color: '#FFD700' },
+  five_weekly_wins: { name: 'Dominant', icon: 'fas fa-chess-king', description: 'Won 5 gameweeks', color: '#FF1744' },
   league_creator: { name: 'Leader', icon: 'fas fa-users', description: 'Created a league', color: '#4169E1' },
   top_3_finish: { name: 'Podium Finish', icon: 'fas fa-award', description: 'Finished top 3 in a gameweek', color: '#CD7F32' },
-  doubler_master: { name: 'Doubler Master', icon: 'fas fa-dice-d20', description: 'Scored 8/8 on a doubler match', color: '#9B59B6' }
+  h2h_winner: { name: 'Head Hunter', icon: 'fas fa-skull-crossbones', description: 'Won a H2H challenge', color: '#E91E63' },
+  h2h_streak_3: { name: 'Rival Crusher', icon: 'fas fa-hand-fist', description: 'Won 3 H2H challenges in a row', color: '#D32F2F' },
+  // Points milestones
+  fifty_points: { name: 'Half Century', icon: 'fas fa-coins', description: 'Reached 50 total points', color: '#FFC107' },
+  hundred_points: { name: 'Century', icon: 'fas fa-sack-dollar', description: 'Reached 100 total points', color: '#FF9800' },
+  two_hundred_points: { name: 'High Roller', icon: 'fas fa-money-bill-trend-up', description: 'Reached 200 total points', color: '#4CAF50' },
+  // Season champion
+  season_champion: { name: 'Season Champion', icon: 'fas fa-crown', description: 'Won the overall season leaderboard', color: '#FFD700' }
 };
 
 // Helper to generate random invite code
@@ -624,14 +664,27 @@ async function checkAndAwardBadges(userId) {
   try {
     const predCount = await db.getUserPredictionCount(userId);
     const streak = await db.getUserStreak(userId);
+    const user = await db.getUserById(userId);
 
+    // Prediction milestones
     if (predCount >= 1) { const r = await db.awardBadge(userId, 'first_prediction'); if (r.awarded) awarded.push('first_prediction'); }
     if (predCount >= 10) { const r = await db.awardBadge(userId, 'ten_predictions'); if (r.awarded) awarded.push('ten_predictions'); }
     if (predCount >= 50) { const r = await db.awardBadge(userId, 'fifty_predictions'); if (r.awarded) awarded.push('fifty_predictions'); }
     if (predCount >= 100) { const r = await db.awardBadge(userId, 'hundred_predictions'); if (r.awarded) awarded.push('hundred_predictions'); }
-    if (streak.current_streak >= 3) { const r = await db.awardBadge(userId, 'streak_3'); if (r.awarded) awarded.push('streak_3'); }
-    if (streak.current_streak >= 5) { const r = await db.awardBadge(userId, 'streak_5'); if (r.awarded) awarded.push('streak_5'); }
-    if (streak.current_streak >= 10) { const r = await db.awardBadge(userId, 'streak_10'); if (r.awarded) awarded.push('streak_10'); }
+    if (predCount >= 200) { const r = await db.awardBadge(userId, 'two_hundred_predictions'); if (r.awarded) awarded.push('two_hundred_predictions'); }
+    if (predCount >= 300) { const r = await db.awardBadge(userId, 'three_hundred_predictions'); if (r.awarded) awarded.push('three_hundred_predictions'); }
+    if (predCount >= 380) { const r = await db.awardBadge(userId, 'full_season'); if (r.awarded) awarded.push('full_season'); }
+
+    // Streak badges
+    if (streak && streak.current_streak >= 3) { const r = await db.awardBadge(userId, 'streak_3'); if (r.awarded) awarded.push('streak_3'); }
+    if (streak && streak.current_streak >= 5) { const r = await db.awardBadge(userId, 'streak_5'); if (r.awarded) awarded.push('streak_5'); }
+    if (streak && streak.current_streak >= 10) { const r = await db.awardBadge(userId, 'streak_10'); if (r.awarded) awarded.push('streak_10'); }
+    if (streak && streak.current_streak >= 20) { const r = await db.awardBadge(userId, 'streak_20'); if (r.awarded) awarded.push('streak_20'); }
+
+    // Points milestones
+    if (user && user.score >= 50) { const r = await db.awardBadge(userId, 'fifty_points'); if (r.awarded) awarded.push('fifty_points'); }
+    if (user && user.score >= 100) { const r = await db.awardBadge(userId, 'hundred_points'); if (r.awarded) awarded.push('hundred_points'); }
+    if (user && user.score >= 200) { const r = await db.awardBadge(userId, 'two_hundred_points'); if (r.awarded) awarded.push('two_hundred_points'); }
   } catch (e) {
     console.error('Badge check error:', e);
   }

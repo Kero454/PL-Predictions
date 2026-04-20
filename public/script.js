@@ -534,6 +534,28 @@ async function handlePredictionSubmit(e) {
     }
 }
 
+// Cancel doubler for current gameweek
+async function cancelDoubler(gameweek) {
+    if (!confirm('Remove your doubler from this match?')) return;
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/doubler/${gameweek}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+            userDoublerMatchId = null;
+            showSuccess('Doubler cancelled');
+            loadMatches();
+        } else {
+            const data = await response.json();
+            showError(data.error || 'Failed to cancel doubler');
+        }
+    } catch (error) {
+        showError('Failed to cancel doubler');
+    }
+}
+
 // Utility functions - showError is defined later with a better UI
 function showError(message) {
     let errorDiv = document.getElementById('errorMessage');
@@ -744,11 +766,15 @@ function createMatchCard(match) {
     // Predicted badge + score overlay
     let predictionOverlay = '';
     if (userPrediction) {
+        const cancelBtn = (userPrediction.isDoubler && match.status === 'upcoming' && canPredict) 
+            ? `<button class="btn-cancel-doubler" onclick="cancelDoubler(${match.gameweek})" title="Cancel Doubler"><i class="fas fa-times"></i></button>` 
+            : '';
         predictionOverlay = `
             <div class="match-predicted-banner">
                 <i class="fas fa-check-circle"></i>
                 <span>Predicted: <strong>${userPrediction.homeScore} - ${userPrediction.awayScore}</strong></span>
                 ${userPrediction.isDoubler ? '<span class="doubler-badge">2x</span>' : ''}
+                ${cancelBtn}
             </div>
         `;
     }
@@ -2082,10 +2108,30 @@ if ('serviceWorker' in navigator) {
 
 // matchStarting socket listener is registered in setupSocketListeners()
 
+// Persistent AudioContext for notification sounds (mobile requires user gesture to unlock)
+let _audioCtx = null;
+function getAudioContext() {
+    if (!_audioCtx) {
+        _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (_audioCtx.state === 'suspended') {
+        _audioCtx.resume();
+    }
+    return _audioCtx;
+}
+
+// Unlock AudioContext on first user interaction (required for iOS/Android)
+['click', 'touchstart', 'keydown'].forEach(evt => {
+    document.addEventListener(evt, function unlockAudio() {
+        getAudioContext();
+        document.removeEventListener(evt, unlockAudio);
+    }, { once: true });
+});
+
 // Generate a referee whistle sound using Web Audio API (no external file needed)
 function playFootballWhistle() {
     try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const ctx = getAudioContext();
         // Three short whistle tones (like a referee whistle)
         const tones = [
             { freq: 3200, start: 0, dur: 0.15 },
@@ -2104,8 +2150,6 @@ function playFootballWhistle() {
             osc.start(ctx.currentTime + t.start);
             osc.stop(ctx.currentTime + t.start + t.dur + 0.05);
         });
-        // Close context after sounds finish
-        setTimeout(() => ctx.close(), 1500);
     } catch (e) {
         console.log('Could not play notification sound:', e);
     }
