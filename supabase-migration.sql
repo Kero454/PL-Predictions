@@ -8,8 +8,12 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT UNIQUE NOT NULL,
   password TEXT NOT NULL,
   score INTEGER DEFAULT 0,
+  title TEXT DEFAULT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- If the table already exists, add the title column
+ALTER TABLE users ADD COLUMN IF NOT EXISTS title TEXT DEFAULT NULL;
 
 -- Predictions table
 CREATE TABLE IF NOT EXISTS predictions (

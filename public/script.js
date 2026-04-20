@@ -315,7 +315,17 @@ function showSection(sectionName) {
     const sections = document.querySelectorAll('.section');
     sections.forEach(section => section.classList.remove('active'));
     
-    document.getElementById(sectionName + 'Section').classList.add('active');
+    const target = document.getElementById(sectionName + 'Section');
+    if (target) target.classList.add('active');
+    
+    // Update desktop tab highlights
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.section === sectionName);
+    });
+    // Update mobile bottom tab highlights
+    document.querySelectorAll('.bottom-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.section === sectionName);
+    });
     
     // Load data for the section
     switch(sectionName) {
@@ -331,8 +341,40 @@ function showSection(sectionName) {
         case 'achievements':
             loadAchievements();
             break;
+        case 'leagues':
+            if (typeof loadLeagues === 'function') loadLeagues();
+            break;
+        case 'h2h':
+            if (typeof loadH2H === 'function') loadH2H();
+            break;
+        case 'profile':
+            if (typeof loadProfile === 'function') loadProfile();
+            break;
+        case 'seasonStats':
+            if (typeof loadSeasonStats === 'function') loadSeasonStats();
+            break;
     }
 }
+
+// Mobile bottom nav "More" menu
+function toggleMoreMenu() {
+    const menu = document.getElementById('moreMenu');
+    if (menu) menu.classList.toggle('open');
+}
+
+function closeMoreMenu() {
+    const menu = document.getElementById('moreMenu');
+    if (menu) menu.classList.remove('open');
+}
+
+// Close more menu when tapping outside
+document.addEventListener('click', function(e) {
+    const menu = document.getElementById('moreMenu');
+    const moreBtn = document.querySelector('.bottom-tab[data-section="more"]');
+    if (menu && menu.classList.contains('open') && !menu.contains(e.target) && !moreBtn.contains(e.target)) {
+        menu.classList.remove('open');
+    }
+});
 
 function toggleMenu() {
     const navMenu = document.getElementById('navMenu');
@@ -431,10 +473,13 @@ function createLeaderboardItem(player, rank) {
     else if (rank === 2) rankClass = 'silver';
     else if (rank === 3) rankClass = 'bronze';
     
+    const titleBadge = player.titleName 
+        ? `<span class="user-title-badge" style="background:${player.titleColor}22;color:${player.titleColor};border:1px solid ${player.titleColor}44">${player.titleName}</span>` 
+        : '';
     item.innerHTML = `
         <div class="player-info">
             <div class="player-rank ${rankClass}">${rank}</div>
-            <div class="player-name">${player.username}</div>
+            <div class="player-name">${player.username}${titleBadge}</div>
         </div>
         <div class="player-score">${player.score} pts</div>
     `;
@@ -1239,11 +1284,69 @@ function copyInviteCode() {
     }
 }
 
+// ===== TITLE SYSTEM =====
+
+async function setTitle(titleKey) {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ titleKey })
+        });
+        const data = await response.json();
+        if (response.ok) {
+            showSuccess(data.message);
+            loadLeaderboard();
+        } else {
+            showError(data.error || 'Failed to set title');
+        }
+    } catch (error) {
+        showError('Failed to set title');
+    }
+}
+
+async function clearTitle() {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ titleKey: null })
+        });
+        if (response.ok) {
+            showSuccess('Title cleared');
+            loadLeaderboard();
+        }
+    } catch (error) {
+        showError('Failed to clear title');
+    }
+}
+
 // ===== ACHIEVEMENTS =====
 
 async function loadAchievements() {
     try {
         const token = localStorage.getItem('token');
+        
+        // Fetch current title
+        try {
+            const titleRes = await fetch('/api/title', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (titleRes.ok) {
+                const titleData = await titleRes.json();
+                const titleBar = document.getElementById('currentTitleBar');
+                const titleName = document.getElementById('currentTitleName');
+                if (titleBar && titleName) {
+                    if (titleData.titleName) {
+                        titleName.textContent = titleData.titleName;
+                        titleBar.style.display = 'flex';
+                    } else {
+                        titleBar.style.display = 'none';
+                    }
+                }
+            }
+        } catch (e) { /* ignore title fetch error */ }
+
         const response = await fetch('/api/achievements', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -1251,7 +1354,6 @@ async function loadAchievements() {
         const achievements = await response.json();
         
         const earned = achievements.filter(a => a.earned);
-        const locked = achievements.filter(a => !a.earned);
         
         // Summary
         const summaryEl = document.getElementById('achievementsSummary');
@@ -1267,28 +1369,49 @@ async function loadAchievements() {
             `;
         }
         
-        // Grid
+        // Grid grouped by tier
         const gridEl = document.getElementById('achievementsGrid');
         if (gridEl) {
             gridEl.innerHTML = '';
             
-            // Earned first, then locked
-            const sorted = [...earned, ...locked];
-            sorted.forEach(a => {
-                const card = document.createElement('div');
-                card.className = `achievement-card ${a.earned ? 'earned' : 'locked'}`;
-                const dateStr = a.earned_at ? new Date(a.earned_at).toLocaleDateString() : '';
-                card.innerHTML = `
-                    <div class="achievement-icon" style="color: ${a.earned ? a.color : '#555'}">
-                        <i class="${a.icon}"></i>
-                    </div>
-                    <div class="achievement-info">
-                        <div class="achievement-name">${a.name}</div>
-                        <div class="achievement-desc">${a.description}</div>
-                        ${a.earned ? `<div class="achievement-date">Earned ${dateStr}</div>` : '<div class="achievement-locked"><i class="fas fa-lock"></i> Locked</div>'}
-                    </div>
+            const tierOrder = ['beginner', 'veteran', 'elite', 'mythic'];
+            const tierLabels = { beginner: 'Beginner', veteran: 'Veteran', elite: 'Elite', mythic: 'Mythic' };
+            const tierColors = { beginner: '#90CAF9', veteran: '#FFD700', elite: '#E91E63', mythic: '#FF1744' };
+            
+            tierOrder.forEach(tier => {
+                const tierAchievements = achievements.filter(a => (a.tier || 'beginner') === tier);
+                if (tierAchievements.length === 0) return;
+                
+                const tierEarned = tierAchievements.filter(a => a.earned).length;
+                
+                // Tier header
+                const header = document.createElement('div');
+                header.className = 'tier-header';
+                header.innerHTML = `
+                    <span class="tier-label" style="color: ${tierColors[tier]}">${tierLabels[tier]}</span>
+                    <span class="tier-count">${tierEarned}/${tierAchievements.length}</span>
                 `;
-                gridEl.appendChild(card);
+                gridEl.appendChild(header);
+                
+                // Earned first, then locked within each tier
+                const sorted = [...tierAchievements.filter(a => a.earned), ...tierAchievements.filter(a => !a.earned)];
+                sorted.forEach(a => {
+                    const card = document.createElement('div');
+                    card.className = `achievement-card ${a.earned ? 'earned' : 'locked'} tier-${a.tier || 'beginner'}`;
+                    const dateStr = a.earned_at ? new Date(a.earned_at).toLocaleDateString() : '';
+                    const titleBtn = a.earned ? `<button class="btn-set-title" onclick="setTitle('${a.key}')" title="Use as title"><i class="fas fa-tag"></i></button>` : '';
+                    card.innerHTML = `
+                        <div class="achievement-icon" style="color: ${a.earned ? a.color : '#555'}">
+                            <i class="${a.icon}"></i>
+                        </div>
+                        <div class="achievement-info">
+                            <div class="achievement-name">${a.name} ${titleBtn}</div>
+                            <div class="achievement-desc">${a.description}</div>
+                            ${a.earned ? `<div class="achievement-date">Earned ${dateStr}</div>` : '<div class="achievement-locked"><i class="fas fa-lock"></i> Locked</div>'}
+                        </div>
+                    `;
+                    gridEl.appendChild(card);
+                });
             });
         }
     } catch (error) {

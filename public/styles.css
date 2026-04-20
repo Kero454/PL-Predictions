@@ -1141,26 +1141,126 @@ body {
     justify-content: center;
 }
 
+/* Mobile bottom tab bar */
+.mobile-bottom-nav {
+    display: none;
+}
+
+.more-menu {
+    display: none;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .nav-brand span {
         font-size: 0.95rem;
     }
     
-    .nav-tabs {
-        padding: 0 0.25rem;
+    /* Hide desktop tabs on mobile */
+    .nav-tabs-desktop {
+        display: none !important;
     }
-    
-    .nav-tab span {
+
+    /* Show mobile bottom tab bar */
+    .mobile-bottom-nav {
+        display: flex;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: #1a1a2e;
+        border-top: 1px solid rgba(255,255,255,0.08);
+        z-index: 1001;
+        padding: 0.3rem 0 env(safe-area-inset-bottom, 0.2rem) 0;
+        justify-content: space-around;
+        align-items: center;
+    }
+
+    .bottom-tab {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.15rem;
+        padding: 0.35rem 0.5rem;
+        color: rgba(255,255,255,0.45);
+        text-decoration: none;
+        font-size: 0.62rem;
+        font-weight: 500;
+        border-radius: 8px;
+        transition: all 0.2s;
+        position: relative;
+        min-width: 52px;
+    }
+
+    .bottom-tab i {
+        font-size: 1.15rem;
+    }
+
+    .bottom-tab span {
+        display: block;
+    }
+
+    .bottom-tab.active {
+        color: #00d2ff;
+    }
+
+    .bottom-tab:hover {
+        color: rgba(255,255,255,0.8);
+    }
+
+    /* More menu popup */
+    .more-menu {
         display: none;
+        position: absolute;
+        bottom: 100%;
+        right: 0;
+        background: #1e2a45;
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 12px;
+        padding: 0.5rem 0;
+        margin-bottom: 0.5rem;
+        min-width: 180px;
+        box-shadow: 0 -8px 30px rgba(0,0,0,0.4);
+        z-index: 1002;
     }
-    
-    .nav-tab {
-        padding: 0.5rem 0.65rem;
+
+    .more-menu.open {
+        display: block;
     }
-    
-    .nav-tab i {
+
+    .more-menu a {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.7rem 1rem;
+        color: rgba(255,255,255,0.8);
+        text-decoration: none;
+        font-size: 0.9rem;
+        transition: background 0.15s;
+    }
+
+    .more-menu a:hover {
+        background: rgba(255,255,255,0.06);
+    }
+
+    .more-menu a i {
         font-size: 1rem;
+        width: 20px;
+        text-align: center;
+        color: rgba(255,255,255,0.5);
+    }
+
+    .more-menu-pro {
+        color: #ffd700 !important;
+    }
+
+    .more-menu-pro i {
+        color: #ffd700 !important;
+    }
+
+    /* Add bottom padding to main content so it doesn't hide behind bottom nav */
+    .container {
+        padding-bottom: 80px;
     }
     
     .welcome-header {
@@ -2953,6 +3053,45 @@ body {
     }
 }
 
+/* Current title bar */
+.current-title-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(0,210,255,0.08);
+    border: 1px solid rgba(0,210,255,0.2);
+    border-radius: 10px;
+    padding: 0.6rem 1rem;
+    margin-bottom: 1rem;
+    color: #fff;
+    font-size: 0.85rem;
+}
+
+.btn-clear-title {
+    background: rgba(255,68,68,0.15);
+    border: 1px solid rgba(255,68,68,0.3);
+    color: #ff4444;
+    border-radius: 6px;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-clear-title:hover {
+    background: rgba(255,68,68,0.3);
+}
+
+.achievements-hint {
+    color: rgba(255,255,255,0.4);
+    font-size: 0.78rem;
+    margin-bottom: 1rem;
+}
+
+.achievements-hint i {
+    margin-right: 4px;
+}
+
 /* ===== ACHIEVEMENTS SECTION ===== */
 
 .achievements-summary {
@@ -3062,6 +3201,79 @@ body {
 
 .achievement-locked i {
     margin-right: 0.25rem;
+}
+
+/* Tier headers */
+.tier-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.6rem 0;
+    margin-top: 1rem;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.tier-header:first-child {
+    margin-top: 0;
+}
+
+.tier-label {
+    font-weight: 700;
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.tier-count {
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.4);
+}
+
+/* Tier-specific card accents */
+.achievement-card.tier-veteran.earned {
+    border-color: rgba(255, 215, 0, 0.25);
+    background: rgba(255, 215, 0, 0.04);
+}
+
+.achievement-card.tier-elite.earned {
+    border-color: rgba(233, 30, 99, 0.3);
+    background: rgba(233, 30, 99, 0.05);
+}
+
+.achievement-card.tier-mythic.earned {
+    border-color: rgba(255, 23, 68, 0.35);
+    background: linear-gradient(135deg, rgba(255,23,68,0.06) 0%, rgba(255,215,0,0.06) 100%);
+}
+
+/* Title button on earned achievements */
+.btn-set-title {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.6);
+    border-radius: 6px;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.65rem;
+    cursor: pointer;
+    margin-left: 6px;
+    transition: all 0.2s;
+    vertical-align: middle;
+}
+
+.btn-set-title:hover {
+    background: rgba(0,210,255,0.15);
+    border-color: #00d2ff;
+    color: #00d2ff;
+}
+
+/* User title badge */
+.user-title-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    margin-left: 6px;
+    vertical-align: middle;
 }
 
 @media (min-width: 600px) {

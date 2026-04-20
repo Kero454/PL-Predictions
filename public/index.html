@@ -37,16 +37,41 @@
                     </button>
                 </div>
             </div>
-            <div class="nav-tabs" id="navMenu">
+            <div class="nav-tabs nav-tabs-desktop" id="navMenu">
                 <a href="#" class="nav-tab active" onclick="showSection('matches')" data-section="matches"><i class="fas fa-futbol"></i><span>Matches</span></a>
                 <a href="#" class="nav-tab" onclick="showSection('predictions')" data-section="predictions"><i class="fas fa-list-check"></i><span>Predictions</span></a>
-                <a href="#" class="nav-tab" onclick="showSection('leaderboard')" data-section="leaderboard"><i class="fas fa-ranking-star"></i><span>Leaderboard</span></a>
+                <a href="#" class="nav-tab" onclick="showSection('leaderboard')" data-section="leaderboard"><i class="fas fa-list-ol"></i><span>Leaderboard</span></a>
                 <a href="#" class="nav-tab" onclick="showSection('leagues')" data-section="leagues"><i class="fas fa-users"></i><span>Leagues</span></a>
                 <a href="#" class="nav-tab" onclick="showSection('h2h')" data-section="h2h"><i class="fas fa-people-arrows"></i><span>H2H</span></a>
                 <a href="#" class="nav-tab" onclick="showSection('reveal')" data-section="reveal"><i class="fas fa-eye"></i><span>Reveals</span></a>
                 <a href="#" class="nav-tab" onclick="showSection('achievements')" data-section="achievements"><i class="fas fa-trophy"></i><span>Achievements</span></a>
                 <a href="#" class="nav-tab" onclick="showSection('seasonStats')" data-section="seasonStats"><i class="fas fa-chart-line"></i><span>Stats</span></a>
                 <a href="#" class="nav-tab pro-tab" onclick="showSection('pro')" data-section="pro"><i class="fas fa-crown"></i><span>Pro</span></a>
+            </div>
+            <!-- Mobile bottom tab bar -->
+            <div class="mobile-bottom-nav" id="mobileBottomNav">
+                <a href="#" class="bottom-tab active" onclick="showSection('matches')" data-section="matches">
+                    <i class="fas fa-futbol"></i><span>Matches</span>
+                </a>
+                <a href="#" class="bottom-tab" onclick="showSection('predictions')" data-section="predictions">
+                    <i class="fas fa-list-check"></i><span>Predict</span>
+                </a>
+                <a href="#" class="bottom-tab" onclick="showSection('leaderboard')" data-section="leaderboard">
+                    <i class="fas fa-list-ol"></i><span>Board</span>
+                </a>
+                <a href="#" class="bottom-tab" onclick="showSection('h2h')" data-section="h2h">
+                    <i class="fas fa-people-arrows"></i><span>H2H</span>
+                </a>
+                <a href="#" class="bottom-tab" onclick="toggleMoreMenu()" data-section="more">
+                    <i class="fas fa-ellipsis"></i><span>More</span>
+                </a>
+                <div class="more-menu" id="moreMenu">
+                    <a href="#" onclick="showSection('leagues'); closeMoreMenu()"><i class="fas fa-users"></i> Leagues</a>
+                    <a href="#" onclick="showSection('reveal'); closeMoreMenu()"><i class="fas fa-eye"></i> Reveals</a>
+                    <a href="#" onclick="showSection('achievements'); closeMoreMenu()"><i class="fas fa-trophy"></i> Achievements</a>
+                    <a href="#" onclick="showSection('seasonStats'); closeMoreMenu()"><i class="fas fa-chart-line"></i> Stats</a>
+                    <a href="#" class="more-menu-pro" onclick="showSection('pro'); closeMoreMenu()"><i class="fas fa-crown"></i> Pro</a>
+                </div>
             </div>
         </nav>
 
@@ -291,7 +316,12 @@
                 <div class="section-header">
                     <h3><i class="fas fa-trophy"></i> Achievements</h3>
                 </div>
+                <div id="currentTitleBar" class="current-title-bar" style="display:none;">
+                    <span>Your title: <strong id="currentTitleName"></strong></span>
+                    <button class="btn-clear-title" onclick="clearTitle()"><i class="fas fa-times"></i> Remove</button>
+                </div>
                 <div id="achievementsSummary" class="achievements-summary"></div>
+                <p class="achievements-hint"><i class="fas fa-tag"></i> Tap the tag icon on an earned achievement to use it as your leaderboard title.</p>
                 <div id="achievementsGrid" class="achievements-grid"></div>
             </div>
 

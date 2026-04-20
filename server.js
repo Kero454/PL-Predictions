@@ -444,12 +444,18 @@ app.get('/api/leaderboard', async (req, res) => {
       // Update user score in database
       await db.updateUserScore(user.id, totalScore);
       
+      // Get user title
+      const titleKey = user.title || null;
+      const titleBadge = titleKey && BADGES[titleKey] ? BADGES[titleKey] : null;
+
       // Add user to leaderboard regardless of score
       leaderboard.push({
         id: user.id,
         username: user.username,
         score: totalScore,
-        predictions: allPredictions.filter(p => p.userId === user.id).length
+        predictions: allPredictions.filter(p => p.userId === user.id).length,
+        titleName: titleBadge ? titleBadge.name : null,
+        titleColor: titleBadge ? titleBadge.color : null
       });
     }
     
@@ -610,44 +616,48 @@ app.post('/api/admin/update-match', (req, res) => {
 });
 
 // ===== BADGE DEFINITIONS =====
+// Tiers: Beginner (easy) → Veteran → Elite → Mythic (hardest)
 const BADGES = {
-  // Prediction milestones (season has 380 matches = 38 GW x 10 matches)
-  first_prediction: { name: 'First Prediction', icon: 'fas fa-star', description: 'Made your first prediction', color: '#FFD700' },
-  ten_predictions: { name: 'Getting Started', icon: 'fas fa-fire', description: 'Made 10 predictions', color: '#FF6B35' },
-  fifty_predictions: { name: 'Dedicated', icon: 'fas fa-medal', description: 'Made 50 predictions', color: '#C0C0C0' },
-  hundred_predictions: { name: 'Centurion', icon: 'fas fa-crown', description: 'Made 100 predictions', color: '#FFD700' },
-  two_hundred_predictions: { name: 'Committed', icon: 'fas fa-shield-halved', description: 'Made 200 predictions', color: '#4169E1' },
-  three_hundred_predictions: { name: 'Iron Will', icon: 'fas fa-gem', description: 'Made 300 predictions', color: '#E91E63' },
-  full_season: { name: 'Full Season', icon: 'fas fa-calendar-check', description: 'Predicted all 380 matches in a season', color: '#00BCD4' },
-  // Gameweek participation
-  full_gameweek: { name: 'Full Card', icon: 'fas fa-clipboard-check', description: 'Predicted all 10 matches in a gameweek', color: '#4CAF50' },
-  ten_full_gameweeks: { name: 'Consistent', icon: 'fas fa-list-check', description: 'Predicted all matches in 10 gameweeks', color: '#2196F3' },
-  twenty_full_gameweeks: { name: 'Machine', icon: 'fas fa-robot', description: 'Predicted all matches in 20 gameweeks', color: '#9C27B0' },
-  // Accuracy badges
-  perfect_score: { name: 'Perfect Score', icon: 'fas fa-bullseye', description: 'Scored 4/4 on a match', color: '#00FF88' },
-  five_perfect: { name: 'Sharpshooter', icon: 'fas fa-crosshairs', description: 'Got 5 perfect scores', color: '#FF5722' },
-  ten_perfect: { name: 'Oracle', icon: 'fas fa-eye', description: 'Got 10 perfect scores', color: '#673AB7' },
-  // Streaks
-  streak_3: { name: 'Hot Streak', icon: 'fas fa-fire-flame-curved', description: '3 correct results in a row', color: '#FF4500' },
-  streak_5: { name: 'On Fire', icon: 'fas fa-meteor', description: '5 correct results in a row', color: '#FF0000' },
-  streak_10: { name: 'Unstoppable', icon: 'fas fa-dragon', description: '10 correct results in a row', color: '#8B0000' },
-  streak_20: { name: 'Legendary', icon: 'fas fa-hat-wizard', description: '20 correct results in a row', color: '#FFD700' },
-  // Doubler badges
-  doubler_master: { name: 'Doubler Master', icon: 'fas fa-dice-d20', description: 'Scored 8/8 on a doubler match', color: '#9B59B6' },
-  doubler_streak_3: { name: 'Double Trouble', icon: 'fas fa-bolt-lightning', description: 'Won 3 doublers in a row', color: '#FF9800' },
-  // Social & competitive
-  weekly_winner: { name: 'Weekly Champion', icon: 'fas fa-trophy', description: 'Won a gameweek', color: '#FFD700' },
-  five_weekly_wins: { name: 'Dominant', icon: 'fas fa-chess-king', description: 'Won 5 gameweeks', color: '#FF1744' },
-  league_creator: { name: 'Leader', icon: 'fas fa-users', description: 'Created a league', color: '#4169E1' },
-  top_3_finish: { name: 'Podium Finish', icon: 'fas fa-award', description: 'Finished top 3 in a gameweek', color: '#CD7F32' },
-  h2h_winner: { name: 'Head Hunter', icon: 'fas fa-skull-crossbones', description: 'Won a H2H challenge', color: '#E91E63' },
-  h2h_streak_3: { name: 'Rival Crusher', icon: 'fas fa-hand-fist', description: 'Won 3 H2H challenges in a row', color: '#D32F2F' },
-  // Points milestones
-  fifty_points: { name: 'Half Century', icon: 'fas fa-coins', description: 'Reached 50 total points', color: '#FFC107' },
-  hundred_points: { name: 'Century', icon: 'fas fa-sack-dollar', description: 'Reached 100 total points', color: '#FF9800' },
-  two_hundred_points: { name: 'High Roller', icon: 'fas fa-money-bill-trend-up', description: 'Reached 200 total points', color: '#4CAF50' },
-  // Season champion
-  season_champion: { name: 'Season Champion', icon: 'fas fa-crown', description: 'Won the overall season leaderboard', color: '#FFD700' }
+  // ── BEGINNER: Prediction milestones ──
+  first_prediction:           { name: 'Rookie',              icon: 'fas fa-star',              description: 'Made your first prediction',         color: '#90CAF9', tier: 'beginner' },
+  ten_predictions:            { name: 'Regular',             icon: 'fas fa-fire',              description: 'Made 10 predictions',                color: '#FF6B35', tier: 'beginner' },
+  fifty_predictions:          { name: 'Dedicated',           icon: 'fas fa-medal',             description: 'Made 50 predictions',                color: '#C0C0C0', tier: 'beginner' },
+  full_gameweek:              { name: 'Full Card',           icon: 'fas fa-clipboard-check',   description: 'Predicted all 10 matches in a gameweek', color: '#4CAF50', tier: 'beginner' },
+  league_creator:             { name: 'Founder',             icon: 'fas fa-users',             description: 'Created a league',                   color: '#4169E1', tier: 'beginner' },
+  fifty_points:               { name: 'Half Century',        icon: 'fas fa-coins',             description: 'Reached 50 total points',            color: '#FFC107', tier: 'beginner' },
+
+  // ── VETERAN: Harder milestones ──
+  hundred_predictions:        { name: 'Centurion',           icon: 'fas fa-shield-halved',     description: 'Made 100 predictions',               color: '#FFD700', tier: 'veteran' },
+  two_hundred_predictions:    { name: 'Ironclad',            icon: 'fas fa-shield',            description: 'Made 200 predictions',               color: '#4169E1', tier: 'veteran' },
+  streak_3:                   { name: 'Hot Streak',          icon: 'fas fa-fire-flame-curved', description: '3 correct results in a row',         color: '#FF4500', tier: 'veteran' },
+  streak_5:                   { name: 'Blazing',             icon: 'fas fa-meteor',            description: '5 correct results in a row',         color: '#FF0000', tier: 'veteran' },
+  perfect_score:              { name: 'Bullseye',            icon: 'fas fa-bullseye',          description: 'Scored 4/4 on a match',              color: '#00FF88', tier: 'veteran' },
+  hundred_points:             { name: 'Century Club',        icon: 'fas fa-sack-dollar',       description: 'Reached 100 total points',           color: '#FF9800', tier: 'veteran' },
+  top_3_finish:               { name: 'Podium',              icon: 'fas fa-award',             description: 'Finished top 3 in a gameweek',       color: '#CD7F32', tier: 'veteran' },
+  h2h_winner:                 { name: 'Head Hunter',         icon: 'fas fa-skull-crossbones',  description: 'Won a H2H challenge',                color: '#E91E63', tier: 'veteran' },
+  weekly_winner:              { name: 'Weekly King',         icon: 'fas fa-trophy',            description: 'Won a gameweek',                     color: '#FFD700', tier: 'veteran' },
+  ten_full_gameweeks:         { name: 'Relentless',          icon: 'fas fa-list-check',        description: 'Predicted all matches in 10 gameweeks', color: '#2196F3', tier: 'veteran' },
+
+  // ── ELITE: Very hard ──
+  three_hundred_predictions:  { name: 'The Grinder',         icon: 'fas fa-gem',               description: 'Made 300 predictions',               color: '#E91E63', tier: 'elite' },
+  streak_10:                  { name: 'Untouchable',         icon: 'fas fa-dragon',            description: '10 correct results in a row',        color: '#8B0000', tier: 'elite' },
+  five_perfect:               { name: 'Sharpshooter',        icon: 'fas fa-crosshairs',        description: 'Got 5 perfect scores (4/4)',         color: '#FF5722', tier: 'elite' },
+  doubler_master:             { name: 'Double or Nothing',   icon: 'fas fa-dice-d20',          description: 'Scored 8/8 on a doubler match',      color: '#9B59B6', tier: 'elite' },
+  two_hundred_points:         { name: 'Big League',          icon: 'fas fa-money-bill-trend-up',description: 'Reached 200 total points',           color: '#4CAF50', tier: 'elite' },
+  three_hundred_points:       { name: 'Point Machine',       icon: 'fas fa-chart-line',        description: 'Reached 300 total points',           color: '#00BCD4', tier: 'elite' },
+  five_weekly_wins:           { name: 'Throne Keeper',       icon: 'fas fa-chess-king',        description: 'Won 5 gameweeks',                    color: '#FF1744', tier: 'elite' },
+  h2h_streak_3:               { name: 'Rival Crusher',       icon: 'fas fa-hand-fist',         description: 'Won 3 H2H challenges in a row',     color: '#D32F2F', tier: 'elite' },
+  twenty_full_gameweeks:      { name: 'The Machine',         icon: 'fas fa-robot',             description: 'Predicted all matches in 20 gameweeks', color: '#9C27B0', tier: 'elite' },
+
+  // ── MYTHIC: Near-impossible feats ──
+  full_season:                { name: 'Absolute Unit',       icon: 'fas fa-calendar-check',    description: 'Predicted all 380 matches in a season', color: '#00BCD4', tier: 'mythic' },
+  streak_20:                  { name: 'The Prophet',          icon: 'fas fa-hat-wizard',        description: '20 correct results in a row',        color: '#FFD700', tier: 'mythic' },
+  ten_perfect:                { name: 'The Oracle',           icon: 'fas fa-eye',               description: 'Got 10 perfect scores (4/4)',        color: '#673AB7', tier: 'mythic' },
+  four_hundred_points:        { name: 'Legendary',            icon: 'fas fa-scroll',            description: 'Reached 400 total points',           color: '#FF6F00', tier: 'mythic' },
+  five_hundred_points:        { name: 'Hall of Fame',         icon: 'fas fa-landmark',          description: 'Reached 500 total points',           color: '#D4AF37', tier: 'mythic' },
+  six_hundred_points:         { name: 'The GOAT',             icon: 'fas fa-mountain-sun',      description: 'Reached 600 total points',           color: '#FF1744', tier: 'mythic' },
+  doubler_streak_3:           { name: 'Fortune\'s Favorite',  icon: 'fas fa-bolt-lightning',    description: 'Won 3 doublers in a row',            color: '#FF9800', tier: 'mythic' },
+  season_champion:            { name: 'Season Champion',      icon: 'fas fa-crown',             description: 'Won the overall season leaderboard', color: '#FFD700', tier: 'mythic' }
 };
 
 // Helper to generate random invite code
@@ -685,6 +695,10 @@ async function checkAndAwardBadges(userId) {
     if (user && user.score >= 50) { const r = await db.awardBadge(userId, 'fifty_points'); if (r.awarded) awarded.push('fifty_points'); }
     if (user && user.score >= 100) { const r = await db.awardBadge(userId, 'hundred_points'); if (r.awarded) awarded.push('hundred_points'); }
     if (user && user.score >= 200) { const r = await db.awardBadge(userId, 'two_hundred_points'); if (r.awarded) awarded.push('two_hundred_points'); }
+    if (user && user.score >= 300) { const r = await db.awardBadge(userId, 'three_hundred_points'); if (r.awarded) awarded.push('three_hundred_points'); }
+    if (user && user.score >= 400) { const r = await db.awardBadge(userId, 'four_hundred_points'); if (r.awarded) awarded.push('four_hundred_points'); }
+    if (user && user.score >= 500) { const r = await db.awardBadge(userId, 'five_hundred_points'); if (r.awarded) awarded.push('five_hundred_points'); }
+    if (user && user.score >= 600) { const r = await db.awardBadge(userId, 'six_hundred_points'); if (r.awarded) awarded.push('six_hundred_points'); }
   } catch (e) {
     console.error('Badge check error:', e);
   }
@@ -796,6 +810,37 @@ app.get('/api/achievements', authenticateToken, async (req, res) => {
     res.json(achievements);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch achievements' });
+  }
+});
+
+// Set user title from an earned achievement
+app.post('/api/title', authenticateToken, async (req, res) => {
+  try {
+    const { titleKey } = req.body;
+    // Validate: titleKey must be null/empty (clear) or an earned badge
+    if (titleKey) {
+      const earned = await db.getUserBadges(req.userId);
+      const earnedKeys = earned.map(b => b.badge_key);
+      if (!earnedKeys.includes(titleKey)) {
+        return res.status(400).json({ error: 'You haven\'t earned this achievement yet' });
+      }
+    }
+    await db.setUserTitle(req.userId, titleKey || null);
+    res.json({ message: titleKey ? `Title set to "${BADGES[titleKey]?.name || titleKey}"` : 'Title cleared' });
+  } catch (error) {
+    console.error('Set title error:', error);
+    res.status(500).json({ error: 'Failed to set title' });
+  }
+});
+
+// Get user's current title
+app.get('/api/title', authenticateToken, async (req, res) => {
+  try {
+    const title = await db.getUserTitle(req.userId);
+    const badge = title && BADGES[title] ? BADGES[title] : null;
+    res.json({ titleKey: title, titleName: badge ? badge.name : null, titleColor: badge ? badge.color : null, titleIcon: badge ? badge.icon : null });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get title' });
   }
 });
 

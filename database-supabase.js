@@ -636,6 +636,26 @@ const deactivateSubscriptionByStripeId = async (stripeSubId) => {
   return { changes: data ? data.length : 0 };
 };
 
+// ===== USER TITLE OPERATIONS =====
+
+const setUserTitle = async (userId, titleKey) => {
+  const { error } = await supabase
+    .from('users')
+    .update({ title: titleKey || null })
+    .eq('id', userId);
+  if (error) throw error;
+};
+
+const getUserTitle = async (userId) => {
+  const { data, error } = await supabase
+    .from('users')
+    .select('title')
+    .eq('id', userId)
+    .single();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data ? data.title : null;
+};
+
 module.exports = {
   initDatabase,
   createUser,
@@ -695,5 +715,8 @@ module.exports = {
   savePushSubscription,
   getUserPushSubscriptions,
   getAllPushSubscriptions,
-  removePushSubscription
+  removePushSubscription,
+  // Titles
+  setUserTitle,
+  getUserTitle
 };
