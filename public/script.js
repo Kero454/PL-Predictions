@@ -345,7 +345,8 @@ function showSection(sectionName) {
             if (typeof loadLeagues === 'function') loadLeagues();
             break;
         case 'h2h':
-            if (typeof loadH2H === 'function') loadH2H();
+            loadH2HChallenges();
+            loadH2HInfo();
             break;
         case 'profile':
             if (typeof loadProfile === 'function') loadProfile();
@@ -1793,22 +1794,37 @@ showMainApp = function() {
 
 let selectedOpponentId = null;
 
-function openH2HChallengeModal() {
+async function openH2HChallengeModal() {
     document.getElementById('h2hChallengeModal').style.display = 'block';
     document.getElementById('h2hSearchInput').value = '';
     document.getElementById('h2hSearchResults').innerHTML = '';
     document.getElementById('sendChallengeBtn').disabled = true;
     selectedOpponentId = null;
 
-    // Populate gameweek selector
-    const sel = document.getElementById('h2hGameweek');
-    sel.innerHTML = '';
-    for (let i = 1; i <= 38; i++) {
-        const opt = document.createElement('option');
-        opt.value = i;
-        opt.textContent = `Gameweek ${i}`;
-        if (i === currentGameweek) opt.selected = true;
-        sel.appendChild(opt);
+    // Fetch H2H info to get allowed challenge GW
+    try {
+        const token = localStorage.getItem('token');
+        const infoRes = await fetch('/api/h2h/info', { headers: { 'Authorization': `Bearer ${token}` } });
+        if (infoRes.ok) {
+            const info = await infoRes.json();
+            const sel = document.getElementById('h2hGameweek');
+            sel.innerHTML = '';
+            const opt = document.createElement('option');
+            opt.value = info.challengeGameweek;
+            opt.textContent = `Gameweek ${info.challengeGameweek}`;
+            opt.selected = true;
+            sel.appendChild(opt);
+
+            if (info.userChallengesThisGW >= info.maxChallenges) {
+                showError(`You already have ${info.maxChallenges} challenges for GW${info.challengeGameweek}`);
+                closeModal('h2hChallengeModal');
+                return;
+            }
+        }
+    } catch (e) {
+        // Fallback: show current GW
+        const sel = document.getElementById('h2hGameweek');
+        sel.innerHTML = `<option value="${currentGameweek}">Gameweek ${currentGameweek}</option>`;
     }
 }
 
@@ -1924,7 +1940,7 @@ async function loadH2HChallenges() {
         }
 
         listContainer.innerHTML = rest.map(c => {
-            const statusClass = c.status === 'accepted' ? 'status-active' : c.status === 'completed' ? 'status-completed' : c.status === 'declined' ? 'status-declined' : 'status-pending';
+            const statusClass = c.status === 'accepted' ? 'status-active' : c.status === 'completed' ? 'status-completed' : c.status === 'declined' ? 'status-declined' : c.status === 'expired' ? 'status-expired' : 'status-pending';
             const isMeChallenger = c.challenger_id === currentUser.id;
             return `
                 <div class="h2h-card ${c.status}">
@@ -1983,6 +1999,71 @@ async function declineChallenge(id) {
             loadH2HChallenges();
         }
     } catch (e) { showError('Failed to decline'); }
+}
+
+// H2H tab switching
+function showH2HTab(tab) {
+    document.querySelectorAll('.h2h-tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('h2hChallengesTab').style.display = tab === 'challenges' ? 'block' : 'none';
+    document.getElementById('h2hLeaderboardTab').style.display = tab === 'leaderboard' ? 'block' : 'none';
+    event.currentTarget.classList.add('active');
+    if (tab === 'leaderboard') loadH2HLeaderboard();
+}
+
+// Load H2H info bar (challenge GW + remaining slots)
+async function loadH2HInfo() {
+    try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/h2h/info', { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!res.ok) return;
+        const info = await res.json();
+        const bar = document.getElementById('h2hInfoBar');
+        const remaining = info.maxChallenges - info.userChallengesThisGW;
+        bar.innerHTML = `
+            <span><i class="fas fa-gamepad"></i> Challenge for: <strong>GW${info.challengeGameweek}</strong></span>
+            <span>${remaining}/${info.maxChallenges} slots left</span>
+        `;
+    } catch (e) { /* ignore */ }
+}
+
+// Load H2H leaderboard
+async function loadH2HLeaderboard() {
+    try {
+        const response = await fetch('/api/h2h/leaderboard');
+        if (!response.ok) throw new Error('Failed');
+        const leaderboard = await response.json();
+        const container = document.getElementById('h2hLeaderboardList');
+
+        if (!leaderboard.length) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-people-arrows"></i>
+                    <p>No completed H2H challenges yet</p>
+                </div>`;
+            return;
+        }
+
+        container.innerHTML = leaderboard.map((p, i) => {
+            const rank = i + 1;
+            let rankClass = '';
+            if (rank === 1) rankClass = 'gold';
+            else if (rank === 2) rankClass = 'silver';
+            else if (rank === 3) rankClass = 'bronze';
+            return `
+                <div class="leaderboard-item ${rank <= 3 ? 'top-3' : ''}">
+                    <div class="player-info">
+                        <div class="player-rank ${rankClass}">${rank}</div>
+                        <div class="player-name">${p.username}</div>
+                    </div>
+                    <div class="player-score" style="display:flex;gap:0.75rem;align-items:center;">
+                        <span style="font-size:0.7rem;color:rgba(255,255,255,0.5);">${p.wins}W ${p.draws}D ${p.losses}L</span>
+                        <span>${p.glory} <i class="fas fa-fire" style="color:#ffd700;font-size:0.7rem;"></i> Glory</span>
+                    </div>
+                </div>`;
+        }).join('');
+    } catch (e) {
+        console.error('H2H leaderboard error:', e);
+    }
 }
 
 // ===== PREDICTION REVEAL =====

@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS users (
 -- If the table already exists, add the title column
 ALTER TABLE users ADD COLUMN IF NOT EXISTS title TEXT DEFAULT NULL;
 
+-- Score adjustment column (for manual point corrections)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS score_adjustment INTEGER DEFAULT 0;
+
 -- Predictions table
 CREATE TABLE IF NOT EXISTS predictions (
   id SERIAL PRIMARY KEY,

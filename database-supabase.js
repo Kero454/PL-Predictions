@@ -474,6 +474,111 @@ const updateH2HScores = async (challengeId, challengerScore, opponentScore, winn
   if (error) throw error;
 };
 
+// Expire pending H2H challenges for a given gameweek (called when GW starts)
+const expirePendingH2HChallenges = async (gameweek) => {
+  const { data, error } = await supabase
+    .from('h2h_challenges')
+    .update({ status: 'expired' })
+    .eq('gameweek', gameweek)
+    .eq('status', 'pending')
+    .select('id');
+  if (error) throw error;
+  return { expired: data ? data.length : 0 };
+};
+
+// Count how many challenges a user has sent/received for a specific gameweek
+const getUserH2HChallengeCountForGW = async (userId, gameweek) => {
+  const { data, error } = await supabase
+    .from('h2h_challenges')
+    .select('id')
+    .eq('gameweek', gameweek)
+    .or(`challenger_id.eq.${userId},opponent_id.eq.${userId}`)
+    .in('status', ['pending', 'accepted', 'completed']);
+  if (error) throw error;
+  return data ? data.length : 0;
+};
+
+// Get accepted (active) H2H challenges for a gameweek (for scoring)
+const getAcceptedH2HChallengesForGW = async (gameweek) => {
+  const { data, error } = await supabase
+    .from('h2h_challenges')
+    .select('*')
+    .eq('gameweek', gameweek)
+    .eq('status', 'accepted');
+  if (error) throw error;
+  return data || [];
+};
+
+// Get H2H leaderboard: aggregate points from completed challenges
+// Winner = 3 pts, Draw = 1 pt each, Loser = 0 pts
+const getH2HLeaderboard = async () => {
+  const { data, error } = await supabase
+    .from('h2h_challenges')
+    .select(`
+      challenger_id, opponent_id, challenger_score, opponent_score, winner_id,
+      challenger:users!h2h_challenges_challenger_id_fkey ( username ),
+      opponent:users!h2h_challenges_opponent_id_fkey ( username )
+    `)
+    .eq('status', 'completed');
+  if (error) throw error;
+
+  const points = {};
+  const stats = {};
+
+  const ensure = (id, name) => {
+    if (!points[id]) {
+      points[id] = 0;
+      stats[id] = { username: name, wins: 0, draws: 0, losses: 0, played: 0 };
+    }
+  };
+
+  (data || []).forEach(c => {
+    const cName = c.challenger?.username || 'Unknown';
+    const oName = c.opponent?.username || 'Unknown';
+    ensure(c.challenger_id, cName);
+    ensure(c.opponent_id, oName);
+    stats[c.challenger_id].played++;
+    stats[c.opponent_id].played++;
+
+    if (c.winner_id === null) {
+      // Draw
+      points[c.challenger_id] += 1;
+      points[c.opponent_id] += 1;
+      stats[c.challenger_id].draws++;
+      stats[c.opponent_id].draws++;
+    } else if (c.winner_id === c.challenger_id) {
+      points[c.challenger_id] += 3;
+      stats[c.challenger_id].wins++;
+      stats[c.opponent_id].losses++;
+    } else {
+      points[c.opponent_id] += 3;
+      stats[c.opponent_id].wins++;
+      stats[c.challenger_id].losses++;
+    }
+  });
+
+  return Object.entries(points).map(([id, pts]) => ({
+    id: parseInt(id),
+    username: stats[id].username,
+    glory: pts,
+    wins: stats[id].wins,
+    draws: stats[id].draws,
+    losses: stats[id].losses,
+    played: stats[id].played
+  })).sort((a, b) => b.glory - a.glory);
+};
+
+// Get H2H win count for a user (for achievements)
+const getUserH2HWins = async (userId) => {
+  const { data, error } = await supabase
+    .from('h2h_challenges')
+    .select('id')
+    .eq('winner_id', userId)
+    .eq('status', 'completed');
+  if (error) throw error;
+  return data ? data.length : 0;
+};
+
 // ===== NOTIFICATION OPERATIONS =====
 
 const createNotification = async (userId, type, title, message, data = null) => {
@@ -636,24 +741,66 @@ const deactivateSubscriptionByStripeId = async (stripeSubId) => {
   return { changes: data ? data.length : 0 };
 };
 
+// ===== SCORE ADJUSTMENT OPERATIONS =====
+// Stored in a local JSON file to avoid needing a DB column
+
+const fs = require('fs');
+const path = require('path');
+const ADJUSTMENTS_FILE = path.join(__dirname, 'score-adjustments.json');
+
+let _adjustmentsCache = null;
+const loadAdjustments = () => {
+  if (_adjustmentsCache) return _adjustmentsCache;
+  try {
+    if (fs.existsSync(ADJUSTMENTS_FILE)) {
+      _adjustmentsCache = JSON.parse(fs.readFileSync(ADJUSTMENTS_FILE, 'utf8'));
+    } else {
+      _adjustmentsCache = {};
+    }
+  } catch (e) {
+    _adjustmentsCache = {};
+  }
+  return _adjustmentsCache;
+};
+
+const setScoreAdjustment = async (userId, adjustment) => {
+  const adj = loadAdjustments();
+  adj[String(userId)] = adjustment;
+  _adjustmentsCache = adj;
+  fs.writeFileSync(ADJUSTMENTS_FILE, JSON.stringify(adj, null, 2));
+};
+
+const getScoreAdjustment = (userId) => {
+  const adj = loadAdjustments();
+  return adj[String(userId)] || 0;
+};
+
 // ===== USER TITLE OPERATIONS =====
 
 const setUserTitle = async (userId, titleKey) => {
-  const { error } = await supabase
-    .from('users')
-    .update({ title: titleKey || null })
-    .eq('id', userId);
-  if (error) throw error;
+  try {
+    const { error } = await supabase
+      .from('users')
+      .update({ title: titleKey || null })
+      .eq('id', userId);
+    if (error) throw error;
+  } catch (e) {
+    console.error('setUserTitle error (title column may not exist):', e.message);
+  }
 };
 
 const getUserTitle = async (userId) => {
-  const { data, error } = await supabase
-    .from('users')
-    .select('title')
-    .eq('id', userId)
-    .single();
-  if (error && error.code !== 'PGRST116') throw error;
-  return data ? data.title : null;
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('title')
+      .eq('id', userId)
+      .single();
+    if (error) return null;
+    return data ? data.title : null;
+  } catch (e) {
+    return null;
+  }
 };
 
 module.exports = {
@@ -696,6 +843,11 @@ module.exports = {
   getUserH2HChallenges,
   getH2HChallenge,
   updateH2HScores,
+  expirePendingH2HChallenges,
+  getUserH2HChallengeCountForGW,
+  getAcceptedH2HChallengesForGW,
+  getH2HLeaderboard,
+  getUserH2HWins,
   // Notifications
   createNotification,
   getUserNotifications,
@@ -716,6 +868,9 @@ module.exports = {
   getUserPushSubscriptions,
   getAllPushSubscriptions,
   removePushSubscription,
+  // Score adjustments
+  setScoreAdjustment,
+  getScoreAdjustment,
   // Titles
   setUserTitle,
   getUserTitle

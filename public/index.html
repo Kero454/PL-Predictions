@@ -288,10 +288,23 @@
                         <button class="btn btn-primary" onclick="openH2HChallengeModal()"><i class="fas fa-plus"></i> Challenge</button>
                     </div>
                 </div>
-                <!-- Pending Challenges -->
-                <div id="h2hPending" class="h2h-section-group"></div>
-                <!-- Active / Completed Challenges -->
-                <div id="h2hList" class="h2h-list"></div>
+                <div id="h2hInfoBar" class="h2h-info-bar">
+                    <!-- Filled by JS: shows challenge GW, remaining slots -->
+                </div>
+                <!-- H2H Sub-tabs -->
+                <div class="h2h-tabs">
+                    <button class="h2h-tab active" onclick="showH2HTab('challenges')">My Challenges</button>
+                    <button class="h2h-tab" onclick="showH2HTab('leaderboard')">H2H Leaderboard</button>
+                </div>
+                <div id="h2hChallengesTab">
+                    <!-- Pending Challenges -->
+                    <div id="h2hPending" class="h2h-section-group"></div>
+                    <!-- Active / Completed Challenges -->
+                    <div id="h2hList" class="h2h-list"></div>
+                </div>
+                <div id="h2hLeaderboardTab" style="display:none;">
+                    <div id="h2hLeaderboardList" class="leaderboard-list"></div>
+                </div>
             </div>
 
             <!-- Prediction Reveal Section -->
