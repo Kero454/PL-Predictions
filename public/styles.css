@@ -1713,17 +1713,17 @@ body {
 
 /* ===== BADGES ===== */
 
-.badges-section {
+.badges-section, .achievements-profile-section {
     margin-bottom: 1.5rem;
 }
 
-.badges-section h4 {
+.badges-section h4, .achievements-profile-section h4 {
     color: white;
     margin-bottom: 1rem;
     font-size: 1.1rem;
 }
 
-.badges-section h4 i {
+.badges-section h4 i, .achievements-profile-section h4 i {
     margin-right: 0.5rem;
     color: #ffd700;
 }
@@ -2103,6 +2103,8 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
 }
 
 .h2h-tabs {

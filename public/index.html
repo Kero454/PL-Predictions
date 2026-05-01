@@ -39,13 +39,11 @@
             </div>
             <div class="nav-tabs nav-tabs-desktop" id="navMenu">
                 <a href="#" class="nav-tab active" onclick="showSection('matches')" data-section="matches"><i class="fas fa-futbol"></i><span>Matches</span></a>
-                <a href="#" class="nav-tab" onclick="showSection('predictions')" data-section="predictions"><i class="fas fa-list-check"></i><span>Predictions</span></a>
                 <a href="#" class="nav-tab" onclick="showSection('leaderboard')" data-section="leaderboard"><i class="fas fa-list-ol"></i><span>Leaderboard</span></a>
                 <a href="#" class="nav-tab" onclick="showSection('leagues')" data-section="leagues"><i class="fas fa-users"></i><span>Leagues</span></a>
                 <a href="#" class="nav-tab" onclick="showSection('h2h')" data-section="h2h"><i class="fas fa-people-arrows"></i><span>H2H</span></a>
-                <a href="#" class="nav-tab" onclick="showSection('reveal')" data-section="reveal"><i class="fas fa-eye"></i><span>Reveals</span></a>
-                <a href="#" class="nav-tab" onclick="showSection('achievements')" data-section="achievements"><i class="fas fa-trophy"></i><span>Achievements</span></a>
                 <a href="#" class="nav-tab" onclick="showSection('seasonStats')" data-section="seasonStats"><i class="fas fa-chart-line"></i><span>Stats</span></a>
+                <a href="#" class="nav-tab" onclick="showSection('profile')" data-section="profile"><i class="fas fa-user-circle"></i><span>Profile</span></a>
                 <a href="#" class="nav-tab pro-tab" onclick="showSection('pro')" data-section="pro"><i class="fas fa-crown"></i><span>Pro</span></a>
             </div>
             <!-- Mobile bottom tab bar -->
@@ -53,22 +51,20 @@
                 <a href="#" class="bottom-tab active" onclick="showSection('matches')" data-section="matches">
                     <i class="fas fa-futbol"></i><span>Matches</span>
                 </a>
-                <a href="#" class="bottom-tab" onclick="showSection('predictions')" data-section="predictions">
-                    <i class="fas fa-list-check"></i><span>Predict</span>
-                </a>
                 <a href="#" class="bottom-tab" onclick="showSection('leaderboard')" data-section="leaderboard">
                     <i class="fas fa-list-ol"></i><span>Board</span>
                 </a>
                 <a href="#" class="bottom-tab" onclick="showSection('h2h')" data-section="h2h">
                     <i class="fas fa-people-arrows"></i><span>H2H</span>
                 </a>
+                <a href="#" class="bottom-tab" onclick="showSection('profile')" data-section="profile">
+                    <i class="fas fa-user-circle"></i><span>Profile</span>
+                </a>
                 <a href="#" class="bottom-tab" onclick="toggleMoreMenu()" data-section="more">
                     <i class="fas fa-ellipsis"></i><span>More</span>
                 </a>
                 <div class="more-menu" id="moreMenu">
                     <a href="#" onclick="showSection('leagues'); closeMoreMenu()"><i class="fas fa-users"></i> Leagues</a>
-                    <a href="#" onclick="showSection('reveal'); closeMoreMenu()"><i class="fas fa-eye"></i> Reveals</a>
-                    <a href="#" onclick="showSection('achievements'); closeMoreMenu()"><i class="fas fa-trophy"></i> Achievements</a>
                     <a href="#" onclick="showSection('seasonStats'); closeMoreMenu()"><i class="fas fa-chart-line"></i> Stats</a>
                     <a href="#" class="more-menu-pro" onclick="showSection('pro'); closeMoreMenu()"><i class="fas fa-crown"></i> Pro</a>
                 </div>
@@ -196,10 +192,10 @@
                 </div>
             </div>
 
-            <!-- Matches Section -->
+            <!-- Matches Section (with sub-tabs: Fixtures, My Predictions, Reveals) -->
             <div id="matchesSection" class="section active">
                 <div class="section-header">
-                    <h3><i class="fas fa-calendar-alt"></i> Gameweek <span id="currentGameweek">1</span> Matches</h3>
+                    <h3><i class="fas fa-calendar-alt"></i> Gameweek <span id="currentGameweek">1</span></h3>
                     <div class="header-controls">
                         <button class="btn btn-secondary btn-sm" onclick="loadMatches()">
                             <i class="fas fa-sync-alt"></i>
@@ -216,25 +212,43 @@
                 </div>
                 <!-- Hidden select for backward compatibility -->
                 <select id="gameweekSelector" style="display:none" onchange="changeGameweek()"></select>
-                <div class="gameweek-info">
-                    <div class="deadline-info" id="deadlineInfo">
-                        <i class="fas fa-clock"></i>
-                        <span id="deadlineText">Loading deadline...</span>
+                <!-- Matches Sub-tabs -->
+                <div class="h2h-tabs matches-sub-tabs">
+                    <button class="h2h-tab active" onclick="showMatchesTab('fixtures')">Fixtures</button>
+                    <button class="h2h-tab" onclick="showMatchesTab('predictions')">My Predictions</button>
+                    <button class="h2h-tab" onclick="showMatchesTab('reveals')">Reveals</button>
+                </div>
+                <!-- Fixtures Tab -->
+                <div id="matchesFixturesTab">
+                    <div class="gameweek-info">
+                        <div class="deadline-info" id="deadlineInfo">
+                            <i class="fas fa-clock"></i>
+                            <span id="deadlineText">Loading deadline...</span>
+                        </div>
+                        <p><i class="fas fa-star"></i> Remember to choose your <strong>doubler match</strong> for this gameweek!</p>
                     </div>
-                    <p><i class="fas fa-star"></i> Remember to choose your <strong>doubler match</strong> for this gameweek!</p>
+                    <div id="matchesContainer" class="matches-list">
+                        <!-- Matches will be loaded here -->
+                    </div>
                 </div>
-                <div id="matchesContainer" class="matches-list">
-                    <!-- Matches will be loaded here -->
+                <!-- My Predictions Tab -->
+                <div id="matchesPredictionsTab" style="display:none;">
+                    <div id="predictionsList" class="predictions-list">
+                        <!-- Predictions will be loaded here -->
+                    </div>
                 </div>
-            </div>
-
-            <!-- Predictions Section -->
-            <div id="predictionsSection" class="section">
-                <div class="section-header">
-                    <h3><i class="fas fa-crystal-ball"></i> My Predictions</h3>
-                </div>
-                <div id="predictionsList" class="predictions-list">
-                    <!-- Predictions will be loaded here -->
+                <!-- Reveals Tab -->
+                <div id="matchesRevealsTab" style="display:none;">
+                    <div class="header-controls" style="margin-bottom:1rem;">
+                        <select id="revealGwSelector" class="gameweek-selector" onchange="loadPredictionReveal()">
+                        </select>
+                    </div>
+                    <div id="revealContent" class="reveal-content">
+                        <div class="empty-state">
+                            <i class="fas fa-eye-slash"></i>
+                            <p>Select a gameweek to see everyone's predictions (available after deadline)</p>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -307,36 +321,7 @@
                 </div>
             </div>
 
-            <!-- Prediction Reveal Section -->
-            <div id="revealSection" class="section">
-                <div class="section-header">
-                    <h3><i class="fas fa-eye"></i> Prediction Reveals</h3>
-                    <div class="header-controls">
-                        <select id="revealGwSelector" class="gameweek-selector" onchange="loadPredictionReveal()">
-                        </select>
-                    </div>
-                </div>
-                <div id="revealContent" class="reveal-content">
-                    <div class="empty-state">
-                        <i class="fas fa-eye-slash"></i>
-                        <p>Select a gameweek to see everyone's predictions (available after deadline)</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Achievements Section -->
-            <div id="achievementsSection" class="section">
-                <div class="section-header">
-                    <h3><i class="fas fa-trophy"></i> Achievements</h3>
-                </div>
-                <div id="currentTitleBar" class="current-title-bar" style="display:none;">
-                    <span>Your title: <strong id="currentTitleName"></strong></span>
-                    <button class="btn-clear-title" onclick="clearTitle()"><i class="fas fa-times"></i> Remove</button>
-                </div>
-                <div id="achievementsSummary" class="achievements-summary"></div>
-                <p class="achievements-hint"><i class="fas fa-tag"></i> Tap the tag icon on an earned achievement to use it as your leaderboard title.</p>
-                <div id="achievementsGrid" class="achievements-grid"></div>
-            </div>
+            <!-- Achievements are now shown inside Profile section -->
 
             <!-- Season Stats Section -->
             <div id="seasonStatsSection" class="section">
@@ -429,12 +414,16 @@
                     <!-- Filled by JS -->
                 </div>
 
-                <!-- Badges -->
-                <div class="badges-section">
-                    <h4><i class="fas fa-medal"></i> Badges & Achievements</h4>
-                    <div id="badgesGrid" class="badges-grid">
-                        <!-- Filled by JS -->
+                <!-- Achievements -->
+                <div class="achievements-profile-section">
+                    <h4><i class="fas fa-trophy"></i> Achievements</h4>
+                    <div id="currentTitleBar" class="current-title-bar" style="display:none;">
+                        <span>Your title: <strong id="currentTitleName"></strong></span>
+                        <button class="btn-clear-title" onclick="clearTitle()"><i class="fas fa-times"></i> Remove</button>
                     </div>
+                    <div id="achievementsSummary" class="achievements-summary"></div>
+                    <p class="achievements-hint"><i class="fas fa-tag"></i> Tap the tag icon on an earned achievement to use it as your leaderboard title.</p>
+                    <div id="achievementsGrid" class="achievements-grid"></div>
                 </div>
 
                 <!-- Push Notifications -->

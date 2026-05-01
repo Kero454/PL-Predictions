@@ -492,7 +492,31 @@ const expirePendingH2HChallenges = async (gameweek) => {
   return { expired: data ? data.length : 0 };
 };
 
-// Count how many challenges a user has sent/received for a specific gameweek
+// Count how many challenge PROPOSALS a user has SENT for a specific gameweek (max 2)
+const getUserH2HProposalCountForGW = async (userId, gameweek) => {
+  const { data, error } = await supabase
+    .from('h2h_challenges')
+    .select('id')
+    .eq('gameweek', gameweek)
+    .eq('challenger_id', userId)
+    .in('status', ['pending', 'accepted', 'completed']);
+  if (error) throw error;
+  return data ? data.length : 0;
+};
+
+// Count how many challenges a user has ACCEPTED for a specific gameweek (max 5)
+const getUserH2HAcceptedCountForGW = async (userId, gameweek) => {
+  const { data, error } = await supabase
+    .from('h2h_challenges')
+    .select('id')
+    .eq('gameweek', gameweek)
+    .eq('opponent_id', userId)
+    .in('status', ['accepted', 'completed']);
+  if (error) throw error;
+  return data ? data.length : 0;
+};
+
+// Legacy: count total challenges for a user in a GW (used by info endpoint)
 const getUserH2HChallengeCountForGW = async (userId, gameweek) => {
   const { data, error } = await supabase
     .from('h2h_challenges')
@@ -502,6 +526,28 @@ const getUserH2HChallengeCountForGW = async (userId, gameweek) => {
     .in('status', ['pending', 'accepted', 'completed']);
   if (error) throw error;
   return data ? data.length : 0;
+};
+
+// Delete expired/declined challenges for a gameweek (cleanup after GW starts)
+const deleteExpiredH2HChallenges = async (gameweek) => {
+  const { data, error } = await supabase
+    .from('h2h_challenges')
+    .delete()
+    .eq('gameweek', gameweek)
+    .in('status', ['expired', 'declined']);
+  if (error) throw error;
+  return { deleted: data ? data.length : 0 };
+};
+
+// Delete completed challenges for a gameweek (cleanup after GW ends)
+const deleteCompletedH2HChallenges = async (gameweek) => {
+  const { data, error } = await supabase
+    .from('h2h_challenges')
+    .delete()
+    .eq('gameweek', gameweek)
+    .eq('status', 'completed');
+  if (error) throw error;
+  return { deleted: data ? data.length : 0 };
 };
 
 // Get accepted (active) H2H challenges for a gameweek (for scoring)
@@ -851,7 +897,11 @@ module.exports = {
   updateH2HScores,
   expirePendingH2HChallenges,
   getUserH2HChallengeCountForGW,
+  getUserH2HProposalCountForGW,
+  getUserH2HAcceptedCountForGW,
   getAcceptedH2HChallengesForGW,
+  deleteExpiredH2HChallenges,
+  deleteCompletedH2HChallenges,
   getH2HLeaderboard,
   getUserH2HWins,
   // Notifications

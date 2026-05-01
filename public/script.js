@@ -332,14 +332,8 @@ function showSection(sectionName) {
         case 'matches':
             loadMatches();
             break;
-        case 'predictions':
-            loadMyPredictions();
-            break;
         case 'leaderboard':
             loadLeaderboard();
-            break;
-        case 'achievements':
-            loadAchievements();
             break;
         case 'leagues':
             if (typeof loadLeagues === 'function') loadLeagues();
@@ -350,11 +344,23 @@ function showSection(sectionName) {
             break;
         case 'profile':
             if (typeof loadProfile === 'function') loadProfile();
+            if (typeof loadAchievements === 'function') loadAchievements();
             break;
         case 'seasonStats':
             if (typeof loadSeasonStats === 'function') loadSeasonStats();
             break;
     }
+}
+
+// Matches sub-tab switching (Fixtures / My Predictions / Reveals)
+function showMatchesTab(tab) {
+    document.querySelectorAll('.matches-sub-tabs .h2h-tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('matchesFixturesTab').style.display = tab === 'fixtures' ? 'block' : 'none';
+    document.getElementById('matchesPredictionsTab').style.display = tab === 'predictions' ? 'block' : 'none';
+    document.getElementById('matchesRevealsTab').style.display = tab === 'reveals' ? 'block' : 'none';
+    event.currentTarget.classList.add('active');
+    if (tab === 'predictions') loadMyPredictions();
+    if (tab === 'reveals') populateRevealSelector();
 }
 
 // Mobile bottom nav "More" menu
@@ -1710,8 +1716,11 @@ showSection = function(sectionName) {
     const target = document.getElementById(sectionName + 'Section');
     if (target) target.classList.add('active');
 
-    // Update active tab in navbar
+    // Update active tab in navbar (desktop + mobile)
     document.querySelectorAll('.nav-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.section === sectionName);
+    });
+    document.querySelectorAll('.bottom-tab').forEach(tab => {
         tab.classList.toggle('active', tab.dataset.section === sectionName);
     });
 
@@ -1725,9 +1734,6 @@ showSection = function(sectionName) {
         case 'matches':
             loadMatches();
             break;
-        case 'predictions':
-            loadMyPredictions();
-            break;
         case 'leaderboard':
             loadLeaderboard();
             break;
@@ -1736,8 +1742,7 @@ showSection = function(sectionName) {
             break;
         case 'h2h':
             loadH2HChallenges();
-            break;
-        case 'reveal':
+            loadH2HInfo();
             break;
         case 'seasonStats':
             loadSeasonStats();
@@ -1749,6 +1754,7 @@ showSection = function(sectionName) {
         case 'profile':
             loadProfile();
             loadWeeklyWinnersHistory();
+            if (typeof loadAchievements === 'function') loadAchievements();
             break;
     }
 }
@@ -1815,8 +1821,8 @@ async function openH2HChallengeModal() {
             opt.selected = true;
             sel.appendChild(opt);
 
-            if (info.userChallengesThisGW >= info.maxChallenges) {
-                showError(`You already have ${info.maxChallenges} challenges for GW${info.challengeGameweek}`);
+            if (info.proposalsSent >= info.maxProposals) {
+                showError(`You already sent ${info.maxProposals} challenge proposals for GW${info.challengeGameweek}`);
                 closeModal('h2hChallengeModal');
                 return;
             }
@@ -2018,10 +2024,12 @@ async function loadH2HInfo() {
         if (!res.ok) return;
         const info = await res.json();
         const bar = document.getElementById('h2hInfoBar');
-        const remaining = info.maxChallenges - info.userChallengesThisGW;
+        const proposalsLeft = info.maxProposals - info.proposalsSent;
+        const acceptsLeft = info.maxAccepts - info.challengesAccepted;
         bar.innerHTML = `
             <span><i class="fas fa-gamepad"></i> Challenge for: <strong>GW${info.challengeGameweek}</strong></span>
-            <span>${remaining}/${info.maxChallenges} slots left</span>
+            <span><i class="fas fa-paper-plane"></i> ${proposalsLeft}/${info.maxProposals} proposals</span>
+            <span><i class="fas fa-check-circle"></i> ${acceptsLeft}/${info.maxAccepts} accepts</span>
         `;
     } catch (e) { /* ignore */ }
 }

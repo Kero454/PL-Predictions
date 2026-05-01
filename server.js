@@ -1107,6 +1107,14 @@ async function processH2HChallenges() {
         await scoreH2HChallenge(ch);
       }
     }
+    // Cleanup: delete expired/declined challenges after GW starts
+    for (let gw = 1; gw <= currentGW; gw++) {
+      await db.deleteExpiredH2HChallenges(gw);
+    }
+    // Cleanup: delete completed challenges from past GWs (scores already in leaderboard)
+    for (let gw = 1; gw < currentGW; gw++) {
+      await db.deleteCompletedH2HChallenges(gw);
+    }
   } catch (e) {
     console.error('[H2H] Process error:', e.message);
   }
@@ -1124,7 +1132,7 @@ app.get('/api/users/search', authenticateToken, async (req, res) => {
   }
 });
 
-// Create H2H challenge — only for next challengeable gameweek, max 2 per GW
+// Create H2H challenge — only for next challengeable gameweek, max 2 proposals per GW
 app.post('/api/h2h/challenge', authenticateToken, async (req, res) => {
   try {
     const { opponentId, gameweek } = req.body;
@@ -1137,16 +1145,10 @@ app.post('/api/h2h/challenge', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: `You can only challenge for Gameweek ${challengeGW}` });
     }
 
-    // Enforce: max 2 challenges per gameweek per user
-    const challengeCount = await db.getUserH2HChallengeCountForGW(req.userId, gameweek);
-    if (challengeCount >= 2) {
-      return res.status(400).json({ error: 'You can only have 2 H2H challenges per gameweek' });
-    }
-
-    // Also check opponent's limit
-    const oppCount = await db.getUserH2HChallengeCountForGW(opponentId, gameweek);
-    if (oppCount >= 2) {
-      return res.status(400).json({ error: 'Opponent already has 2 challenges for this gameweek' });
+    // Enforce: max 2 challenge PROPOSALS per gameweek per user
+    const proposalCount = await db.getUserH2HProposalCountForGW(req.userId, gameweek);
+    if (proposalCount >= 2) {
+      return res.status(400).json({ error: 'You can only send 2 challenge proposals per gameweek' });
     }
 
     const result = await db.createH2HChallenge(req.userId, opponentId, gameweek);
@@ -1176,9 +1178,14 @@ app.post('/api/h2h/:id/accept', authenticateToken, async (req, res) => {
     const gwMatches = await fetchPremierLeagueMatches(challenge.gameweek);
     const deadline = calculateGameweekDeadline(gwMatches.filter(m => m.gameweek === challenge.gameweek));
     if (deadline && new Date() >= new Date(deadline)) {
-      // Auto-expire instead
       await db.expirePendingH2HChallenges(challenge.gameweek);
       return res.status(400).json({ error: 'This gameweek has already started — challenge expired' });
+    }
+
+    // Enforce: max 5 accepted challenges per GW for the accepting user
+    const acceptedCount = await db.getUserH2HAcceptedCountForGW(req.userId, challenge.gameweek);
+    if (acceptedCount >= 5) {
+      return res.status(400).json({ error: 'You can only accept up to 5 challenges per gameweek' });
     }
 
     await db.acceptH2HChallenge(parseInt(req.params.id), req.userId);
@@ -1232,8 +1239,16 @@ app.get('/api/h2h/info', authenticateToken, async (req, res) => {
   try {
     const currentGW = await getCurrentGameweek();
     const challengeGW = await getNextChallengeableGW();
-    const challengeCount = await db.getUserH2HChallengeCountForGW(req.userId, challengeGW);
-    res.json({ currentGameweek: currentGW, challengeGameweek: challengeGW, userChallengesThisGW: challengeCount, maxChallenges: 2 });
+    const proposalCount = await db.getUserH2HProposalCountForGW(req.userId, challengeGW);
+    const acceptedCount = await db.getUserH2HAcceptedCountForGW(req.userId, challengeGW);
+    res.json({
+      currentGameweek: currentGW,
+      challengeGameweek: challengeGW,
+      proposalsSent: proposalCount,
+      maxProposals: 2,
+      challengesAccepted: acceptedCount,
+      maxAccepts: 5
+    });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get H2H info' });
   }
@@ -1823,6 +1838,9 @@ async function initApp() {
       startNotificationScheduler();
     }
     
+    // Run H2H cleanup on startup
+    processH2HChallenges().catch(e => console.error('[H2H] Startup cleanup error:', e.message));
+
     console.log(`Full app ready for connections`);
   } catch (error) {
     console.error('Database initialization failed:', error);
