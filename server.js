@@ -899,6 +899,9 @@ app.get('/api/badges', authenticateToken, async (req, res) => {
 // Get all achievements with earned/unearned status for the user
 app.get('/api/achievements', authenticateToken, async (req, res) => {
   try {
+    // Retroactively check and award any new badges before returning
+    await checkAndAwardBadges(req.userId);
+
     const earned = await db.getUserBadges(req.userId);
     const earnedMap = {};
     earned.forEach(b => { earnedMap[b.badge_key] = b.earned_at; });
@@ -1044,6 +1047,19 @@ async function getCurrentGameweek() {
   return Math.max(...gws);
 }
 
+// Helper: find the next gameweek whose prediction deadline hasn't passed (for H2H challenges)
+async function getNextChallengeableGW() {
+  const allMatches = await fetchPremierLeagueMatches();
+  const now = new Date();
+  for (let gw = 1; gw <= 38; gw++) {
+    const gwMatches = allMatches.filter(m => m.gameweek === gw);
+    if (gwMatches.length === 0) continue;
+    const deadline = calculateGameweekDeadline(gwMatches);
+    if (deadline && new Date(deadline) > now) return gw;
+  }
+  return 38; // fallback
+}
+
 // Helper: score an H2H challenge by comparing both players' GW scores
 async function scoreH2HChallenge(challenge) {
   const allMatches = await fetchPremierLeagueMatches(challenge.gameweek);
@@ -1108,18 +1124,17 @@ app.get('/api/users/search', authenticateToken, async (req, res) => {
   }
 });
 
-// Create H2H challenge — only for NEXT gameweek, max 2 per GW
+// Create H2H challenge — only for next challengeable gameweek, max 2 per GW
 app.post('/api/h2h/challenge', authenticateToken, async (req, res) => {
   try {
     const { opponentId, gameweek } = req.body;
     if (!opponentId || !gameweek) return res.status(400).json({ error: 'Opponent and gameweek required' });
     if (opponentId === req.userId) return res.status(400).json({ error: 'Cannot challenge yourself' });
 
-    // Enforce: challenges only for the NEXT gameweek
-    const currentGW = await getCurrentGameweek();
-    const nextGW = Math.min(currentGW + 1, 38);
-    if (gameweek !== nextGW && gameweek !== currentGW) {
-      return res.status(400).json({ error: `You can only challenge for Gameweek ${nextGW}` });
+    // Enforce: challenges only for a GW whose deadline hasn't passed
+    const challengeGW = await getNextChallengeableGW();
+    if (gameweek !== challengeGW) {
+      return res.status(400).json({ error: `You can only challenge for Gameweek ${challengeGW}` });
     }
 
     // Enforce: max 2 challenges per gameweek per user
@@ -1216,9 +1231,9 @@ app.get('/api/h2h/leaderboard', async (req, res) => {
 app.get('/api/h2h/info', authenticateToken, async (req, res) => {
   try {
     const currentGW = await getCurrentGameweek();
-    const nextGW = Math.min(currentGW + 1, 38);
-    const challengeCount = await db.getUserH2HChallengeCountForGW(req.userId, nextGW);
-    res.json({ currentGameweek: currentGW, challengeGameweek: nextGW, userChallengesThisGW: challengeCount, maxChallenges: 2 });
+    const challengeGW = await getNextChallengeableGW();
+    const challengeCount = await db.getUserH2HChallengeCountForGW(req.userId, challengeGW);
+    res.json({ currentGameweek: currentGW, challengeGameweek: challengeGW, userChallengesThisGW: challengeCount, maxChallenges: 2 });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get H2H info' });
   }

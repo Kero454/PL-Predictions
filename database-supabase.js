@@ -433,18 +433,24 @@ const getUserH2HChallenges = async (userId) => {
     .select(`
       *,
       challenger:users!h2h_challenges_challenger_id_fkey ( username ),
-      opponent:users!h2h_challenges_opponent_id_fkey ( username ),
-      winner:users!h2h_challenges_winner_id_fkey ( username )
+      opponent:users!h2h_challenges_opponent_id_fkey ( username )
     `)
     .or(`challenger_id.eq.${userId},opponent_id.eq.${userId}`)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data || []).map(r => ({
-    ...r,
-    challenger_name: r.challenger?.username,
-    opponent_name: r.opponent?.username,
-    winner_name: r.winner?.username
-  }));
+  return (data || []).map(r => {
+    const cName = r.challenger?.username;
+    const oName = r.opponent?.username;
+    let winnerName = null;
+    if (r.winner_id === r.challenger_id) winnerName = cName;
+    else if (r.winner_id === r.opponent_id) winnerName = oName;
+    return {
+      ...r,
+      challenger_name: cName,
+      opponent_name: oName,
+      winner_name: winnerName
+    };
+  });
 };
 
 const getH2HChallenge = async (challengeId) => {

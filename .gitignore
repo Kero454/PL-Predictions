@@ -3,3 +3,4 @@ node_modules/
 predictions.db
 *.db-journal
 .vercel
+score-adjustments.json
