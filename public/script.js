@@ -353,14 +353,69 @@ function showSection(sectionName) {
 }
 
 // Matches sub-tab switching (Fixtures / My Predictions / Reveals)
-function showMatchesTab(tab) {
+let activeMatchesTab = 'fixtures';
+function showMatchesTab(tab, evt) {
+    activeMatchesTab = tab;
     document.querySelectorAll('.matches-sub-tabs .h2h-tab').forEach(t => t.classList.remove('active'));
     document.getElementById('matchesFixturesTab').style.display = tab === 'fixtures' ? 'block' : 'none';
     document.getElementById('matchesPredictionsTab').style.display = tab === 'predictions' ? 'block' : 'none';
     document.getElementById('matchesRevealsTab').style.display = tab === 'reveals' ? 'block' : 'none';
-    event.currentTarget.classList.add('active');
+    const clicked = evt ? evt.currentTarget : document.querySelector(`.matches-sub-tabs .h2h-tab:nth-child(${tab === 'fixtures' ? 1 : tab === 'predictions' ? 2 : 3})`);
+    if (clicked) clicked.classList.add('active');
     if (tab === 'predictions') loadMyPredictions();
-    if (tab === 'reveals') populateRevealSelector();
+    if (tab === 'reveals') loadRevealForCurrentGW();
+}
+
+// Load reveals for the currently selected gameweek (uses same GW pills as fixtures)
+async function loadRevealForCurrentGW() {
+    const container = document.getElementById('revealContent');
+    if (!currentGameweek) {
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-eye-slash"></i><p>No gameweek selected</p></div>';
+        return;
+    }
+    try {
+        const response = await fetch(`/api/predictions/reveal/${currentGameweek}`);
+        const data = await response.json();
+
+        if (data.locked) {
+            container.innerHTML = `
+                <div class="reveal-locked">
+                    <i class="fas fa-lock"></i>
+                    <h4>Predictions Locked</h4>
+                    <p>GW${currentGameweek} predictions will be revealed once the deadline passes.</p>
+                </div>`;
+            return;
+        }
+
+        if (!data.matches || !data.matches.length) {
+            container.innerHTML = '<div class="empty-state"><i class="fas fa-calendar-times"></i><p>No matches found for this gameweek</p></div>';
+            return;
+        }
+
+        container.innerHTML = data.matches.map(match => {
+            const matchPreds = data.predictions[match.id] || [];
+            return `
+                <div class="reveal-match-card">
+                    <div class="reveal-match-header">
+                        <span class="reveal-teams">${match.homeTeam} vs ${match.awayTeam}</span>
+                        ${match.status === 'finished' ? `<span class="reveal-result">Final: ${match.homeScore}-${match.awayScore}</span>` : `<span class="reveal-status">${match.status.toUpperCase()}</span>`}
+                    </div>
+                    <div class="reveal-predictions">
+                        ${matchPreds.length === 0 ? '<div class="reveal-none">No predictions</div>' :
+                        matchPreds.map(p => `
+                            <div class="reveal-pred-row">
+                                <span class="reveal-username">${p.username}</span>
+                                <span class="reveal-pred-score">${p.homeScore} - ${p.awayScore}</span>
+                                ${p.isDoubler ? '<span class="reveal-doubler">2x</span>' : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>Failed to load predictions</p></div>';
+    }
 }
 
 // Mobile bottom nav "More" menu
@@ -451,13 +506,16 @@ async function loadMyPredictions() {
             }
         });
         
-        const predictions = await response.json();
+        const allPredictions = await response.json();
+        
+        // Filter by current gameweek
+        const predictions = allPredictions.filter(p => p.gameweek == currentGameweek);
         
         const predictionsList = document.getElementById('predictionsList');
         predictionsList.innerHTML = '';
         
         if (predictions.length === 0) {
-            predictionsList.innerHTML = '<p style="text-align: center; color: white; padding: 2rem;">No predictions yet. Go to matches to make your first prediction!</p>';
+            predictionsList.innerHTML = `<div class="empty-state"><i class="fas fa-clipboard-list"></i><p>No predictions for Gameweek ${currentGameweek}. Go to Fixtures to predict!</p></div>`;
             return;
         }
         
@@ -480,13 +538,16 @@ function createLeaderboardItem(player, rank) {
     else if (rank === 2) rankClass = 'silver';
     else if (rank === 3) rankClass = 'bronze';
     
-    const titleBadge = player.titleName 
-        ? `<span class="user-title-badge" style="background:${player.titleColor}22;color:${player.titleColor};border:1px solid ${player.titleColor}44">${player.titleName}</span>` 
+    const titleLine = player.titleName 
+        ? `<div class="player-title">${player.titleName}</div>` 
         : '';
     item.innerHTML = `
         <div class="player-info">
             <div class="player-rank ${rankClass}">${rank}</div>
-            <div class="player-name">${player.username}${titleBadge}</div>
+            <div class="player-name-wrap">
+                <div class="player-name">${player.username}</div>
+                ${titleLine}
+            </div>
         </div>
         <div class="player-score">${player.score} pts</div>
     `;
@@ -1070,20 +1131,28 @@ async function loadGameweeks() {
             console.log('Could not fetch matches for gameweek detection');
         }
 
-        // Set currentGameweek to first upcoming if not already set
+        // Set currentGameweek using deadline-based logic
+        // Skip GWs where most matches are finished (avoids postponed match jumping)
         if (!currentGameweek) {
-            const firstUpcoming = matchList.find(m => m.status === 'upcoming');
-            if (firstUpcoming) {
-                currentGameweek = firstUpcoming.gameweek;
-            } else {
-                // Fallback: last finished gameweek or 1
-                const finished = matchList.filter(m => m.status === 'finished');
-                if (finished.length > 0) {
-                    currentGameweek = Math.max(...finished.map(m => m.gameweek));
-                } else {
-                    currentGameweek = 1;
+            let detectedGW = null;
+            for (let gw = 1; gw <= 38; gw++) {
+                const gwMatches = matchList.filter(m => m.gameweek === gw);
+                if (gwMatches.length === 0) continue;
+                const finishedCount = gwMatches.filter(m => m.status === 'finished').length;
+                const upcomingCount = gwMatches.filter(m => m.status === 'upcoming' || m.status === 'live').length;
+                // A GW is "current" if most of its matches are still upcoming
+                // Skip GWs where only 1-2 postponed matches remain (rest finished)
+                if (upcomingCount > 0 && (upcomingCount > finishedCount || finishedCount === 0)) {
+                    detectedGW = gw;
+                    break;
                 }
             }
+            if (!detectedGW) {
+                // All finished: use highest GW that has matches
+                const finished = matchList.filter(m => m.status === 'finished');
+                detectedGW = finished.length > 0 ? Math.max(...finished.map(m => m.gameweek)) : 1;
+            }
+            currentGameweek = detectedGW;
             console.log('Auto-detected gameweek:', currentGameweek);
         }
 
@@ -1788,11 +1857,9 @@ showMainApp = function() {
     loadGameweeks().then(() => {
         loadMatches();
         loadLeaderboard();
-        loadMyPredictions();
         loadProfile();
         loadWeeklyWinner();
         loadNotificationCount();
-        populateRevealSelector();
     });
 }
 
@@ -1903,7 +1970,13 @@ async function loadH2HChallenges() {
         const response = await fetch('/api/h2h', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
-        const challenges = await response.json();
+        const allChallenges = await response.json();
+
+        // Filter out expired/declined challenges and completed challenges from past GWs
+        const challenges = allChallenges.filter(c => {
+            if (c.status === 'expired' || c.status === 'declined') return false;
+            return true;
+        });
 
         const pending = challenges.filter(c => c.status === 'pending' && c.opponent_id === currentUser.id);
         const rest = challenges.filter(c => !(c.status === 'pending' && c.opponent_id === currentUser.id));
@@ -2537,7 +2610,10 @@ function selectGameweekPill(gw) {
     const selector = document.getElementById('gameweekSelector');
     if (selector) selector.value = gw;
 
-    loadMatches();
+    // Reload the active matches sub-tab
+    if (activeMatchesTab === 'predictions') loadMyPredictions();
+    else if (activeMatchesTab === 'reveals') loadRevealForCurrentGW();
+    else loadMatches();
 }
 
 function scrollGameweeks(direction) {

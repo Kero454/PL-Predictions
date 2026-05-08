@@ -710,8 +710,9 @@ app.post('/api/admin/set-scores', async (req, res) => {
 
 // ===== BADGE DEFINITIONS =====
 // Tiers: Beginner (easy) → Veteran → Elite → Mythic (hardest)
+// Better titles require significantly more effort to earn
 const BADGES = {
-  // ── BEGINNER: Prediction milestones ──
+  // ── BEGINNER: Entry-level achievements ──
   first_prediction:           { name: 'Rookie',              icon: 'fas fa-star',              description: 'Made your first prediction',         color: '#90CAF9', tier: 'beginner' },
   ten_predictions:            { name: 'Regular',             icon: 'fas fa-fire',              description: 'Made 10 predictions',                color: '#FF6B35', tier: 'beginner' },
   fifty_predictions:          { name: 'Dedicated',           icon: 'fas fa-medal',             description: 'Made 50 predictions',                color: '#C0C0C0', tier: 'beginner' },
@@ -719,40 +720,48 @@ const BADGES = {
   league_creator:             { name: 'Founder',             icon: 'fas fa-users',             description: 'Created a league',                   color: '#4169E1', tier: 'beginner' },
   fifty_points:               { name: 'Half Century',        icon: 'fas fa-coins',             description: 'Reached 50 total points',            color: '#FFC107', tier: 'beginner' },
 
-  // ── VETERAN: Harder milestones ──
+  // ── VETERAN: Requires consistent play over weeks ──
   hundred_predictions:        { name: 'Centurion',           icon: 'fas fa-shield-halved',     description: 'Made 100 predictions',               color: '#FFD700', tier: 'veteran' },
   two_hundred_predictions:    { name: 'Ironclad',            icon: 'fas fa-shield',            description: 'Made 200 predictions',               color: '#4169E1', tier: 'veteran' },
-  streak_3:                   { name: 'Hot Streak',          icon: 'fas fa-fire-flame-curved', description: '3 correct results in a row',         color: '#FF4500', tier: 'veteran' },
-  streak_5:                   { name: 'Blazing',             icon: 'fas fa-meteor',            description: '5 correct results in a row',         color: '#FF0000', tier: 'veteran' },
+  streak_5:                   { name: 'Hot Streak',          icon: 'fas fa-fire-flame-curved', description: '5 correct results in a row',         color: '#FF4500', tier: 'veteran' },
+  streak_7:                   { name: 'Blazing',             icon: 'fas fa-meteor',            description: '7 correct results in a row',         color: '#FF0000', tier: 'veteran' },
   perfect_score:              { name: 'Bullseye',            icon: 'fas fa-bullseye',          description: 'Scored 4/4 on a match',              color: '#00FF88', tier: 'veteran' },
   hundred_points:             { name: 'Century Club',        icon: 'fas fa-sack-dollar',       description: 'Reached 100 total points',           color: '#FF9800', tier: 'veteran' },
+  two_hundred_points:         { name: 'Rising Star',         icon: 'fas fa-money-bill-trend-up',description: 'Reached 200 total points',           color: '#4CAF50', tier: 'veteran' },
   top_3_finish:               { name: 'Podium',              icon: 'fas fa-award',             description: 'Finished top 3 in a gameweek',       color: '#CD7F32', tier: 'veteran' },
   h2h_winner:                 { name: 'Head Hunter',         icon: 'fas fa-skull-crossbones',  description: 'Won a H2H challenge',                color: '#E91E63', tier: 'veteran' },
-  h2h_5_wins:                 { name: 'Duelist',             icon: 'fas fa-swords',            description: 'Won 5 H2H challenges',               color: '#AB47BC', tier: 'veteran' },
   weekly_winner:              { name: 'Weekly King',         icon: 'fas fa-trophy',            description: 'Won a gameweek',                     color: '#FFD700', tier: 'veteran' },
   ten_full_gameweeks:         { name: 'Relentless',          icon: 'fas fa-list-check',        description: 'Predicted all matches in 10 gameweeks', color: '#2196F3', tier: 'veteran' },
 
-  // ── ELITE: Very hard ──
+  // ── ELITE: Requires exceptional skill + dedication ──
   three_hundred_predictions:  { name: 'The Grinder',         icon: 'fas fa-gem',               description: 'Made 300 predictions',               color: '#E91E63', tier: 'elite' },
   streak_10:                  { name: 'Untouchable',         icon: 'fas fa-dragon',            description: '10 correct results in a row',        color: '#8B0000', tier: 'elite' },
+  streak_15:                  { name: 'Unstoppable',         icon: 'fas fa-bolt',              description: '15 correct results in a row',        color: '#FF1744', tier: 'elite' },
   five_perfect:               { name: 'Sharpshooter',        icon: 'fas fa-crosshairs',        description: 'Got 5 perfect scores (4/4)',         color: '#FF5722', tier: 'elite' },
+  eight_perfect:              { name: 'Sniper',              icon: 'fas fa-binoculars',        description: 'Got 8 perfect scores (4/4)',         color: '#D50000', tier: 'elite' },
   doubler_master:             { name: 'Double or Nothing',   icon: 'fas fa-dice-d20',          description: 'Scored 8/8 on a doubler match',      color: '#9B59B6', tier: 'elite' },
-  two_hundred_points:         { name: 'Big League',          icon: 'fas fa-money-bill-trend-up',description: 'Reached 200 total points',           color: '#4CAF50', tier: 'elite' },
   three_hundred_points:       { name: 'Point Machine',       icon: 'fas fa-chart-line',        description: 'Reached 300 total points',           color: '#00BCD4', tier: 'elite' },
+  four_hundred_points:        { name: 'Legendary',           icon: 'fas fa-scroll',            description: 'Reached 400 total points',           color: '#FF6F00', tier: 'elite' },
   five_weekly_wins:           { name: 'Throne Keeper',       icon: 'fas fa-chess-king',        description: 'Won 5 gameweeks',                    color: '#FF1744', tier: 'elite' },
-  h2h_streak_3:               { name: 'Rival Crusher',       icon: 'fas fa-hand-fist',         description: 'Won 3 H2H challenges in a row',     color: '#D32F2F', tier: 'elite' },
+  h2h_5_wins:                 { name: 'Duelist',             icon: 'fas fa-khanda',            description: 'Won 5 H2H challenges',               color: '#AB47BC', tier: 'elite' },
   h2h_10_wins:                { name: 'Gladiator',           icon: 'fas fa-shield-halved',     description: 'Won 10 H2H challenges',              color: '#FF6F00', tier: 'elite' },
+  h2h_streak_3:               { name: 'Rival Crusher',       icon: 'fas fa-hand-fist',         description: 'Won 3 H2H challenges in a row',     color: '#D32F2F', tier: 'elite' },
   twenty_full_gameweeks:      { name: 'The Machine',         icon: 'fas fa-robot',             description: 'Predicted all matches in 20 gameweeks', color: '#9C27B0', tier: 'elite' },
 
-  // ── MYTHIC: Near-impossible feats ──
+  // ── MYTHIC: Near-impossible feats, only the best earn these ──
   full_season:                { name: 'Absolute Unit',       icon: 'fas fa-calendar-check',    description: 'Predicted all 380 matches in a season', color: '#00BCD4', tier: 'mythic' },
   streak_20:                  { name: 'The Prophet',          icon: 'fas fa-hat-wizard',        description: '20 correct results in a row',        color: '#FFD700', tier: 'mythic' },
+  streak_30:                  { name: 'Inhuman',              icon: 'fas fa-infinity',          description: '30 correct results in a row',        color: '#E040FB', tier: 'mythic' },
   ten_perfect:                { name: 'The Oracle',           icon: 'fas fa-eye',               description: 'Got 10 perfect scores (4/4)',        color: '#673AB7', tier: 'mythic' },
-  four_hundred_points:        { name: 'Legendary',            icon: 'fas fa-scroll',            description: 'Reached 400 total points',           color: '#FF6F00', tier: 'mythic' },
+  fifteen_perfect:            { name: 'Clairvoyant',          icon: 'fas fa-brain',             description: 'Got 15 perfect scores (4/4)',        color: '#AA00FF', tier: 'mythic' },
   five_hundred_points:        { name: 'Hall of Fame',         icon: 'fas fa-landmark',          description: 'Reached 500 total points',           color: '#D4AF37', tier: 'mythic' },
   six_hundred_points:         { name: 'The GOAT',             icon: 'fas fa-mountain-sun',      description: 'Reached 600 total points',           color: '#FF1744', tier: 'mythic' },
+  seven_hundred_points:       { name: 'Immortal',             icon: 'fas fa-sun',               description: 'Reached 700 total points',           color: '#FFD700', tier: 'mythic' },
   doubler_streak_3:           { name: 'Fortune\'s Favorite',  icon: 'fas fa-bolt-lightning',    description: 'Won 3 doublers in a row',            color: '#FF9800', tier: 'mythic' },
+  doubler_streak_5:           { name: 'Golden Touch',         icon: 'fas fa-hand-sparkles',     description: 'Won 5 doublers in a row',            color: '#FFD700', tier: 'mythic' },
   h2h_20_wins:                { name: 'Warlord',              icon: 'fas fa-chess-queen',       description: 'Won 20 H2H challenges',              color: '#B71C1C', tier: 'mythic' },
+  h2h_30_wins:                { name: 'Supreme',              icon: 'fas fa-skull',             description: 'Won 30 H2H challenges',              color: '#4A0072', tier: 'mythic' },
+  ten_weekly_wins:            { name: 'Dynasty',              icon: 'fas fa-chess-rook',        description: 'Won 10 gameweeks',                   color: '#BF360C', tier: 'mythic' },
   season_champion:            { name: 'Season Champion',      icon: 'fas fa-crown',             description: 'Won the overall season leaderboard', color: '#FFD700', tier: 'mythic' }
 };
 
@@ -1033,15 +1042,27 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
 // ===== HEAD-TO-HEAD ENDPOINTS =====
 
 // Helper: determine the "current" gameweek from cached matches
+// Uses deadline-based detection: first GW whose deadline hasn't passed.
+// This prevents postponed matches from earlier GWs causing a jump back.
 async function getCurrentGameweek() {
   const allMatches = await fetchPremierLeagueMatches();
   const now = new Date();
-  // Find the first gameweek that has at least one upcoming match
+
+  // Primary: find first GW whose deadline hasn't passed yet
   for (let gw = 1; gw <= 38; gw++) {
     const gwMatches = allMatches.filter(m => m.gameweek === gw);
-    const hasUpcoming = gwMatches.some(m => new Date(m.date) > now);
-    if (hasUpcoming) return gw;
+    if (gwMatches.length === 0) continue;
+    const deadline = calculateGameweekDeadline(gwMatches);
+    if (deadline && new Date(deadline) > now) return gw;
   }
+
+  // Fallback: find first GW that still has upcoming matches (live GW)
+  for (let gw = 1; gw <= 38; gw++) {
+    const gwMatches = allMatches.filter(m => m.gameweek === gw);
+    const allFinished = gwMatches.length > 0 && gwMatches.every(m => m.status === 'finished');
+    if (!allFinished && gwMatches.length > 0) return gw;
+  }
+
   // All finished
   const gws = allMatches.map(m => m.gameweek);
   return Math.max(...gws);
@@ -1746,7 +1767,8 @@ const updateMatchResults = (matchId, homeScore, awayScore) => {
 // Checks every 60 seconds for matches about to start, and sends weekly reminders.
 const notificationState = {
   notifiedMatchIds: new Set(),  // track which match-start notifications already sent
-  lastWeeklyReminder: 0         // timestamp of last weekly reminder
+  lastWeeklyReminder: 0,        // timestamp of last weekly reminder
+  remindedGameweeks: new Set()   // track which GW deadline reminders already sent
 };
 
 const startNotificationScheduler = () => {
@@ -1797,21 +1819,32 @@ const startNotificationScheduler = () => {
       // --- Process H2H challenges (expire pending, score completed) ---
       await processH2HChallenges();
 
-      // --- Weekly prediction reminder (once per day, on Monday/Tuesday/Wednesday) ---
-      const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon...
-      const hourOfDay = now.getHours();
-      const daysSinceLastReminder = (now - notificationState.lastWeeklyReminder) / (1000 * 60 * 60 * 24);
-      
-      // Send reminder on Wednesday at ~10am if not sent in last 5 days
-      if (dayOfWeek === 3 && hourOfDay >= 10 && hourOfDay < 11 && daysSinceLastReminder > 5) {
-        notificationState.lastWeeklyReminder = Date.now();
-        // Find next upcoming gameweek
-        const upcomingGw = allMatches.find(m => m.status === 'upcoming');
-        if (upcomingGw) {
-          const title = '🏟️ Time to Predict!';
-          const body = `Gameweek ${upcomingGw.gameweek} matches are coming up. Don't forget to submit your predictions!`;
+      // --- GW deadline reminder (~2 hours before first match of each GW) ---
+      for (let gw = 1; gw <= 38; gw++) {
+        if (notificationState.remindedGameweeks.has(gw)) continue;
+        const gwMatches = allMatches.filter(m => m.gameweek === gw);
+        if (!gwMatches.length) continue;
+        const deadline = calculateGameweekDeadline(gwMatches);
+        if (!deadline) continue;
+        const deadlineDate = new Date(deadline);
+        const hoursUntilDeadline = (deadlineDate - now) / (1000 * 60 * 60);
+        // Send reminder when deadline is within 2 hours but hasn't passed yet
+        if (hoursUntilDeadline > 0 && hoursUntilDeadline <= 2) {
+          notificationState.remindedGameweeks.add(gw);
+          const minsLeft = Math.round(hoursUntilDeadline * 60);
+          const title = '🏟️ Prediction Deadline Soon!';
+          const body = `Gameweek ${gw} deadline is in ${minsLeft < 60 ? minsLeft + ' minutes' : Math.round(hoursUntilDeadline * 10) / 10 + ' hours'}! Submit your predictions now.`;
+          // Push notification to all subscribed devices
           await sendPushToAll(title, body, '/');
-          console.log(`[Notify] Weekly reminder sent for GW${upcomingGw.gameweek}`);
+          // In-app notification to all users
+          try {
+            const allUsers = await db.getAllUsers();
+            for (const user of allUsers) {
+              await db.createNotification(user.id, 'gw_reminder', title, body, { gameweek: gw });
+            }
+          } catch (e) { console.error('[Notify] In-app reminder error:', e.message); }
+          io.emit('gwReminder', { gameweek: gw });
+          console.log(`[Notify] GW${gw} deadline reminder sent (${minsLeft} min left)`);
         }
       }
     } catch (err) {

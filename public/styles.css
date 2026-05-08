@@ -1158,6 +1158,11 @@ body {
     .nav-brand span {
         font-size: 0.95rem;
     }
+
+    /* Add bottom padding so content isn't hidden behind fixed bottom nav */
+    .main-content, #mainApp {
+        padding-bottom: 80px !important;
+    }
     
     /* Hide desktop tabs on mobile */
     .nav-tabs-desktop {
@@ -3334,15 +3339,21 @@ body {
     color: #00d2ff;
 }
 
-/* User title badge */
-.user-title-badge {
-    display: inline-block;
+/* Player name wrapper for leaderboard */
+.player-name-wrap {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
+/* Player achievement title in leaderboard */
+.player-title {
     font-size: 0.65rem;
-    font-weight: 600;
-    padding: 0.1rem 0.4rem;
-    border-radius: 4px;
-    margin-left: 6px;
-    vertical-align: middle;
+    color: #888;
+    font-weight: 400;
+    font-style: italic;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+    margin-top: 1px;
 }
 
 @media (min-width: 600px) {

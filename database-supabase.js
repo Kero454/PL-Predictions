@@ -147,10 +147,18 @@ const getUserDoubler = async (userId, gameweek) => {
 // ===== LEADERBOARD =====
 
 const getAllUsers = async () => {
-  const { data, error } = await supabase
+  // Try with title column first, fall back without it
+  let { data, error } = await supabase
     .from('users')
-    .select('id, username, score')
+    .select('id, username, score, title')
     .order('score', { ascending: false });
+  if (error && error.message && error.message.includes('title')) {
+    // title column doesn't exist yet — fall back
+    ({ data, error } = await supabase
+      .from('users')
+      .select('id, username, score')
+      .order('score', { ascending: false }));
+  }
   if (error) throw error;
   return data || [];
 };
@@ -534,7 +542,8 @@ const deleteExpiredH2HChallenges = async (gameweek) => {
     .from('h2h_challenges')
     .delete()
     .eq('gameweek', gameweek)
-    .in('status', ['expired', 'declined']);
+    .in('status', ['expired', 'declined'])
+    .select('id');
   if (error) throw error;
   return { deleted: data ? data.length : 0 };
 };
@@ -545,7 +554,8 @@ const deleteCompletedH2HChallenges = async (gameweek) => {
     .from('h2h_challenges')
     .delete()
     .eq('gameweek', gameweek)
-    .eq('status', 'completed');
+    .eq('status', 'completed')
+    .select('id');
   if (error) throw error;
   return { deleted: data ? data.length : 0 };
 };
