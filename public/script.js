@@ -1131,22 +1131,28 @@ async function loadGameweeks() {
             console.log('Could not fetch matches for gameweek detection');
         }
 
-        // Set currentGameweek using deadline-based logic
-        // Skip GWs where most matches are finished (avoids postponed match jumping)
+        // Detect current gameweek:
+        // 1. First look for an "in-progress" GW (has both finished AND upcoming/live matches)
+        // 2. Then look for the first fully-upcoming GW
+        // 3. Fallback to the latest GW with finished matches
         if (!currentGameweek) {
-            let detectedGW = null;
+            let inProgressGW = null;
+            let firstUpcomingGW = null;
             for (let gw = 1; gw <= 38; gw++) {
                 const gwMatches = matchList.filter(m => m.gameweek === gw);
                 if (gwMatches.length === 0) continue;
                 const finishedCount = gwMatches.filter(m => m.status === 'finished').length;
-                const upcomingCount = gwMatches.filter(m => m.status === 'upcoming' || m.status === 'live').length;
-                // A GW is "current" if most of its matches are still upcoming
-                // Skip GWs where only 1-2 postponed matches remain (rest finished)
-                if (upcomingCount > 0 && (upcomingCount > finishedCount || finishedCount === 0)) {
-                    detectedGW = gw;
-                    break;
+                const upcomingOrLive = gwMatches.filter(m => m.status === 'upcoming' || m.status === 'live').length;
+                // In-progress: has both finished and upcoming/live matches
+                if (finishedCount > 0 && upcomingOrLive > 0 && !inProgressGW) {
+                    inProgressGW = gw;
+                }
+                // First fully upcoming GW
+                if (finishedCount === 0 && upcomingOrLive > 0 && !firstUpcomingGW) {
+                    firstUpcomingGW = gw;
                 }
             }
+            let detectedGW = inProgressGW || firstUpcomingGW;
             if (!detectedGW) {
                 // All finished: use highest GW that has matches
                 const finished = matchList.filter(m => m.status === 'finished');

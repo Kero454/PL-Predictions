@@ -1059,26 +1059,22 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
 // ===== HEAD-TO-HEAD ENDPOINTS =====
 
 // Helper: determine the "current" gameweek from cached matches
-// Uses deadline-based detection: first GW whose deadline hasn't passed.
-// This prevents postponed matches from earlier GWs causing a jump back.
+// Priority: in-progress GW > first upcoming GW > latest finished GW
 async function getCurrentGameweek() {
   const allMatches = await fetchPremierLeagueMatches();
-  const now = new Date();
 
-  // Primary: find first GW whose deadline hasn't passed yet
+  let inProgressGW = null;
+  let firstUpcomingGW = null;
   for (let gw = 1; gw <= 38; gw++) {
     const gwMatches = allMatches.filter(m => m.gameweek === gw);
     if (gwMatches.length === 0) continue;
-    const deadline = calculateGameweekDeadline(gwMatches);
-    if (deadline && new Date(deadline) > now) return gw;
+    const finCount = gwMatches.filter(m => m.status === 'finished').length;
+    const upLive = gwMatches.filter(m => m.status === 'upcoming' || m.status === 'live').length;
+    if (finCount > 0 && upLive > 0 && !inProgressGW) inProgressGW = gw;
+    if (finCount === 0 && upLive > 0 && !firstUpcomingGW) firstUpcomingGW = gw;
   }
-
-  // Fallback: find first GW that still has upcoming matches (live GW)
-  for (let gw = 1; gw <= 38; gw++) {
-    const gwMatches = allMatches.filter(m => m.gameweek === gw);
-    const allFinished = gwMatches.length > 0 && gwMatches.every(m => m.status === 'finished');
-    if (!allFinished && gwMatches.length > 0) return gw;
-  }
+  if (inProgressGW) return inProgressGW;
+  if (firstUpcomingGW) return firstUpcomingGW;
 
   // All finished
   const gws = allMatches.map(m => m.gameweek);
