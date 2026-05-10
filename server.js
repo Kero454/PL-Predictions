@@ -202,6 +202,19 @@ const _fetchFromAPI = async () => {
       originalGameweek: match.matchday
     }));
 
+  // Manual score overrides (temporary fixes until API corrects itself)
+  const SCORE_OVERRIDES = [
+    { homeTeam: 'West Ham United FC', awayTeam: 'Arsenal FC', gameweek: 36, homeScore: 0, awayScore: 1 },
+  ];
+  SCORE_OVERRIDES.forEach(ov => {
+    const m = mapped.find(m => m.homeTeam === ov.homeTeam && m.awayTeam === ov.awayTeam && m.gameweek === ov.gameweek);
+    if (m) {
+      console.log(`[Cache] Score override: ${m.homeTeam} vs ${m.awayTeam} GW${m.gameweek} → ${ov.homeScore}-${ov.awayScore}`);
+      m.homeScore = ov.homeScore;
+      m.awayScore = ov.awayScore;
+    }
+  });
+
   // Fix delayed/rescheduled matches: detect matches whose date falls far outside
   // their gameweek's normal window and reassign them to the correct gameweek.
   // Two-pass approach to avoid outliers polluting date ranges.
