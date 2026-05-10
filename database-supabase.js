@@ -147,18 +147,10 @@ const getUserDoubler = async (userId, gameweek) => {
 // ===== LEADERBOARD =====
 
 const getAllUsers = async () => {
-  // Try with title column first, fall back without it
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('users')
-    .select('id, username, score, title')
+    .select('id, username, score')
     .order('score', { ascending: false });
-  if (error && error.message && error.message.includes('title')) {
-    // title column doesn't exist yet — fall back
-    ({ data, error } = await supabase
-      .from('users')
-      .select('id, username, score')
-      .order('score', { ascending: false }));
-  }
   if (error) throw error;
   return data || [];
 };
@@ -838,31 +830,32 @@ const getScoreAdjustment = (userId) => {
 };
 
 // ===== USER TITLE OPERATIONS =====
+// Stored in local JSON file (no DB column needed)
+
+const TITLES_FILE = path.join(__dirname, 'user-titles.json');
+
+const loadTitles = () => {
+  try {
+    if (fs.existsSync(TITLES_FILE)) {
+      return JSON.parse(fs.readFileSync(TITLES_FILE, 'utf8'));
+    }
+  } catch (e) { /* ignore */ }
+  return {};
+};
 
 const setUserTitle = async (userId, titleKey) => {
-  try {
-    const { error } = await supabase
-      .from('users')
-      .update({ title: titleKey || null })
-      .eq('id', userId);
-    if (error) throw error;
-  } catch (e) {
-    console.error('setUserTitle error (title column may not exist):', e.message);
+  const titles = loadTitles();
+  if (titleKey) {
+    titles[String(userId)] = titleKey;
+  } else {
+    delete titles[String(userId)];
   }
+  fs.writeFileSync(TITLES_FILE, JSON.stringify(titles, null, 2));
 };
 
 const getUserTitle = async (userId) => {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select('title')
-      .eq('id', userId)
-      .single();
-    if (error) return null;
-    return data ? data.title : null;
-  } catch (e) {
-    return null;
-  }
+  const titles = loadTitles();
+  return titles[String(userId)] || null;
 };
 
 module.exports = {

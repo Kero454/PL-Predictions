@@ -1344,8 +1344,10 @@ async function openLeagueLeaderboard(leagueId) {
 }
 
 function backToLeaguesList() {
-    document.getElementById('leaguesList').style.display = '';
-    document.getElementById('leagueLeaderboardView').style.display = 'none';
+    const list = document.getElementById('leaguesList');
+    const view = document.getElementById('leagueLeaderboardView');
+    if (list) list.style.display = '';
+    if (view) view.style.display = 'none';
 }
 
 function copyInviteCode() {
@@ -1964,89 +1966,131 @@ async function sendH2HChallenge() {
     }
 }
 
+let h2hSelectedGW = null; // null = 'All'
+let h2hAllChallenges = [];
+
 async function loadH2HChallenges() {
     try {
         const token = localStorage.getItem('token');
         const response = await fetch('/api/h2h', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
-        const allChallenges = await response.json();
+        h2hAllChallenges = await response.json();
 
-        // Filter out expired/declined challenges and completed challenges from past GWs
-        const challenges = allChallenges.filter(c => {
-            if (c.status === 'expired' || c.status === 'declined') return false;
-            return true;
-        });
+        // Build H2H GW pills
+        renderH2HGwPills();
 
-        const pending = challenges.filter(c => c.status === 'pending' && c.opponent_id === currentUser.id);
-        const rest = challenges.filter(c => !(c.status === 'pending' && c.opponent_id === currentUser.id));
-
-        // Pending challenges (need action)
-        const pendingContainer = document.getElementById('h2hPending');
-        if (pending.length > 0) {
-            pendingContainer.innerHTML = `
-                <h4 style="color:#ffd700; margin-bottom:0.75rem;"><i class="fas fa-exclamation-circle"></i> Pending Challenges</h4>
-                ${pending.map(c => `
-                    <div class="h2h-card pending">
-                        <div class="h2h-card-header">
-                            <span class="h2h-gw">GW${c.gameweek}</span>
-                            <span class="h2h-status status-pending">PENDING</span>
-                        </div>
-                        <div class="h2h-players">
-                            <span class="h2h-player">${c.challenger_name}</span>
-                            <span class="h2h-vs">VS</span>
-                            <span class="h2h-player">${c.opponent_name}</span>
-                        </div>
-                        <div class="h2h-actions">
-                            <button class="btn btn-primary btn-sm" onclick="acceptChallenge(${c.id})"><i class="fas fa-check"></i> Accept</button>
-                            <button class="btn btn-secondary btn-sm" onclick="declineChallenge(${c.id})"><i class="fas fa-times"></i> Decline</button>
-                        </div>
-                    </div>
-                `).join('')}`;
-        } else {
-            pendingContainer.innerHTML = '';
-        }
-
-        // All other challenges
-        const listContainer = document.getElementById('h2hList');
-        if (!rest.length && !pending.length) {
-            listContainer.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-people-arrows"></i>
-                    <p>No challenges yet. Challenge a friend!</p>
-                </div>`;
-            return;
-        }
-
-        listContainer.innerHTML = rest.map(c => {
-            const statusClass = c.status === 'accepted' ? 'status-active' : c.status === 'completed' ? 'status-completed' : c.status === 'declined' ? 'status-declined' : c.status === 'expired' ? 'status-expired' : 'status-pending';
-            const isMeChallenger = c.challenger_id === currentUser.id;
-            return `
-                <div class="h2h-card ${c.status}">
-                    <div class="h2h-card-header">
-                        <span class="h2h-gw">GW${c.gameweek}</span>
-                        <span class="h2h-status ${statusClass}">${c.status.toUpperCase()}</span>
-                    </div>
-                    <div class="h2h-players">
-                        <div class="h2h-player-side ${c.winner_id === c.challenger_id ? 'winner' : ''}">
-                            <span class="h2h-player-name">${c.challenger_name}</span>
-                            ${c.status === 'completed' ? `<span class="h2h-score">${c.challenger_score} pts</span>` : ''}
-                        </div>
-                        <span class="h2h-vs">VS</span>
-                        <div class="h2h-player-side ${c.winner_id === c.opponent_id ? 'winner' : ''}">
-                            <span class="h2h-player-name">${c.opponent_name}</span>
-                            ${c.status === 'completed' ? `<span class="h2h-score">${c.opponent_score} pts</span>` : ''}
-                        </div>
-                    </div>
-                    ${c.status === 'completed' && c.winner_name ? `<div class="h2h-winner"><i class="fas fa-trophy" style="color:#ffd700;"></i> ${c.winner_name} wins!</div>` : ''}
-                    ${c.status === 'completed' && !c.winner_id ? `<div class="h2h-winner"><i class="fas fa-handshake" style="color:#667eea;"></i> It's a draw!</div>` : ''}
-                    ${c.status === 'pending' && isMeChallenger ? `<div class="h2h-waiting"><i class="fas fa-hourglass-half"></i> Waiting for response...</div>` : ''}
-                </div>
-            `;
-        }).join('');
+        // Render challenges for selected GW
+        renderH2HChallenges();
     } catch (e) {
         console.error('Failed to load H2H challenges:', e);
     }
+}
+
+function renderH2HGwPills() {
+    const container = document.getElementById('h2hGwPills');
+    if (!container) return;
+
+    // Collect GWs that have challenges
+    const gwSet = new Set(h2hAllChallenges.map(c => c.gameweek));
+    // Also include currentGameweek and surrounding GWs for future navigation
+    if (currentGameweek) {
+        for (let i = Math.max(1, currentGameweek - 2); i <= Math.min(38, currentGameweek + 2); i++) gwSet.add(i);
+    }
+    const gwList = [...gwSet].sort((a, b) => a - b);
+
+    let html = `<button class="gw-pill ${h2hSelectedGW === null ? 'active' : ''}" onclick="selectH2HGW(null)">All</button>`;
+    gwList.forEach(gw => {
+        const hasChallenges = h2hAllChallenges.some(c => c.gameweek === gw);
+        const isCurrent = gw === currentGameweek;
+        html += `<button class="gw-pill ${h2hSelectedGW === gw ? 'active' : ''} ${isCurrent ? 'current' : ''}" onclick="selectH2HGW(${gw})">GW${gw}${hasChallenges ? '' : ''}</button>`;
+    });
+    container.innerHTML = html;
+}
+
+function selectH2HGW(gw) {
+    h2hSelectedGW = gw;
+    renderH2HGwPills();
+    renderH2HChallenges();
+}
+
+function renderH2HChallenges() {
+    // Filter challenges by selected GW
+    let challenges = h2hAllChallenges.filter(c => {
+        if (c.status === 'expired' || c.status === 'declined') return false;
+        return true;
+    });
+    if (h2hSelectedGW !== null) {
+        challenges = challenges.filter(c => c.gameweek === h2hSelectedGW);
+    }
+
+    const pending = challenges.filter(c => c.status === 'pending' && c.opponent_id === currentUser.id);
+    const rest = challenges.filter(c => !(c.status === 'pending' && c.opponent_id === currentUser.id));
+
+    // Pending challenges (need action)
+    const pendingContainer = document.getElementById('h2hPending');
+    if (pending.length > 0) {
+        pendingContainer.innerHTML = `
+            <h4 style="color:#ffd700; margin-bottom:0.75rem;"><i class="fas fa-exclamation-circle"></i> Pending Challenges</h4>
+            ${pending.map(c => `
+                <div class="h2h-card pending">
+                    <div class="h2h-card-header">
+                        <span class="h2h-gw">GW${c.gameweek}</span>
+                        <span class="h2h-status status-pending">PENDING</span>
+                    </div>
+                    <div class="h2h-players">
+                        <span class="h2h-player">${c.challenger_name}</span>
+                        <span class="h2h-vs">VS</span>
+                        <span class="h2h-player">${c.opponent_name}</span>
+                    </div>
+                    <div class="h2h-actions">
+                        <button class="btn btn-primary btn-sm" onclick="acceptChallenge(${c.id})"><i class="fas fa-check"></i> Accept</button>
+                        <button class="btn btn-secondary btn-sm" onclick="declineChallenge(${c.id})"><i class="fas fa-times"></i> Decline</button>
+                    </div>
+                </div>
+            `).join('')}`;
+    } else {
+        pendingContainer.innerHTML = '';
+    }
+
+    // All other challenges
+    const listContainer = document.getElementById('h2hList');
+    if (!rest.length && !pending.length) {
+        const gwLabel = h2hSelectedGW !== null ? ` for GW${h2hSelectedGW}` : '';
+        listContainer.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-people-arrows"></i>
+                <p>No challenges${gwLabel}. Challenge a friend!</p>
+            </div>`;
+        return;
+    }
+
+    listContainer.innerHTML = rest.map(c => {
+        const statusClass = c.status === 'accepted' ? 'status-active' : c.status === 'completed' ? 'status-completed' : c.status === 'declined' ? 'status-declined' : c.status === 'expired' ? 'status-expired' : 'status-pending';
+        const isMeChallenger = c.challenger_id === currentUser.id;
+        return `
+            <div class="h2h-card ${c.status}">
+                <div class="h2h-card-header">
+                    <span class="h2h-gw">GW${c.gameweek}</span>
+                    <span class="h2h-status ${statusClass}">${c.status.toUpperCase()}</span>
+                </div>
+                <div class="h2h-players">
+                    <div class="h2h-player-side ${c.winner_id === c.challenger_id ? 'winner' : ''}">
+                        <span class="h2h-player-name">${c.challenger_name}</span>
+                        ${c.status === 'completed' ? `<span class="h2h-score">${c.challenger_score} pts</span>` : ''}
+                    </div>
+                    <span class="h2h-vs">VS</span>
+                    <div class="h2h-player-side ${c.winner_id === c.opponent_id ? 'winner' : ''}">
+                        <span class="h2h-player-name">${c.opponent_name}</span>
+                        ${c.status === 'completed' ? `<span class="h2h-score">${c.opponent_score} pts</span>` : ''}
+                    </div>
+                </div>
+                ${c.status === 'completed' && c.winner_name ? `<div class="h2h-winner"><i class="fas fa-trophy" style="color:#ffd700;"></i> ${c.winner_name} wins!</div>` : ''}
+                ${c.status === 'completed' && !c.winner_id ? `<div class="h2h-winner"><i class="fas fa-handshake" style="color:#667eea;"></i> It's a draw!</div>` : ''}
+                ${c.status === 'pending' && isMeChallenger ? `<div class="h2h-waiting"><i class="fas fa-hourglass-half"></i> Waiting for response...</div>` : ''}
+            </div>
+        `;
+    }).join('');
 }
 
 async function acceptChallenge(id) {
@@ -2081,11 +2125,14 @@ async function declineChallenge(id) {
 }
 
 // H2H tab switching
-function showH2HTab(tab) {
-    document.querySelectorAll('.h2h-tab').forEach(t => t.classList.remove('active'));
+function showH2HTab(tab, evt) {
+    const tabs = document.querySelectorAll('.h2h-tabs .h2h-tab');
+    tabs.forEach(t => t.classList.remove('active'));
     document.getElementById('h2hChallengesTab').style.display = tab === 'challenges' ? 'block' : 'none';
     document.getElementById('h2hLeaderboardTab').style.display = tab === 'leaderboard' ? 'block' : 'none';
-    event.currentTarget.classList.add('active');
+    const clicked = evt ? evt.currentTarget : (tab === 'challenges' ? tabs[0] : tabs[1]);
+    if (clicked) clicked.classList.add('active');
+    if (tab === 'challenges') loadH2HChallenges();
     if (tab === 'leaderboard') loadH2HLeaderboard();
 }
 
@@ -2107,13 +2154,21 @@ async function loadH2HInfo() {
     } catch (e) { /* ignore */ }
 }
 
-// Load H2H leaderboard
+// Load H2H leaderboard (with player total scores from main leaderboard)
 async function loadH2HLeaderboard() {
     try {
-        const response = await fetch('/api/h2h/leaderboard');
-        if (!response.ok) throw new Error('Failed');
-        const leaderboard = await response.json();
+        const [h2hRes, lbRes] = await Promise.all([
+            fetch('/api/h2h/leaderboard'),
+            fetch('/api/leaderboard')
+        ]);
+        if (!h2hRes.ok) throw new Error('Failed');
+        const leaderboard = await h2hRes.json();
+        const mainLb = lbRes.ok ? await lbRes.json() : [];
         const container = document.getElementById('h2hLeaderboardList');
+
+        // Build a score lookup from main leaderboard
+        const scoreLookup = {};
+        mainLb.forEach(p => { scoreLookup[p.id] = p.score; });
 
         if (!leaderboard.length) {
             container.innerHTML = `
@@ -2130,15 +2185,18 @@ async function loadH2HLeaderboard() {
             if (rank === 1) rankClass = 'gold';
             else if (rank === 2) rankClass = 'silver';
             else if (rank === 3) rankClass = 'bronze';
+            const totalScore = scoreLookup[p.id] !== undefined ? scoreLookup[p.id] : '—';
             return `
                 <div class="leaderboard-item ${rank <= 3 ? 'top-3' : ''}">
                     <div class="player-info">
                         <div class="player-rank ${rankClass}">${rank}</div>
-                        <div class="player-name">${p.username}</div>
+                        <div class="player-name-wrap">
+                            <div class="player-name">${p.username}</div>
+                            <div style="font-size:0.65rem;color:rgba(255,255,255,0.45);">${p.wins}W ${p.draws}D ${p.losses}L · ${totalScore} pts overall</div>
+                        </div>
                     </div>
-                    <div class="player-score" style="display:flex;gap:0.75rem;align-items:center;">
-                        <span style="font-size:0.7rem;color:rgba(255,255,255,0.5);">${p.wins}W ${p.draws}D ${p.losses}L</span>
-                        <span>${p.glory} <i class="fas fa-fire" style="color:#ffd700;font-size:0.7rem;"></i> Glory</span>
+                    <div class="player-score">
+                        <span>${p.glory} <i class="fas fa-fire" style="color:#ffd700;font-size:0.7rem;"></i></span>
                     </div>
                 </div>`;
         }).join('');

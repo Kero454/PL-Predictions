@@ -303,10 +303,14 @@
                 </div>
                 <!-- H2H Sub-tabs -->
                 <div class="h2h-tabs">
-                    <button class="h2h-tab active" onclick="showH2HTab('challenges')">My Challenges</button>
-                    <button class="h2h-tab" onclick="showH2HTab('leaderboard')">H2H Leaderboard</button>
+                    <button class="h2h-tab active" onclick="showH2HTab('challenges', event)">My Challenges</button>
+                    <button class="h2h-tab" onclick="showH2HTab('leaderboard', event)">H2H Leaderboard</button>
                 </div>
                 <div id="h2hChallengesTab">
+                    <!-- H2H Gameweek Navigation -->
+                    <div id="h2hGwNav" class="gameweek-pills-container" style="margin-bottom:0.75rem;">
+                        <div id="h2hGwPills" class="gameweek-pills"></div>
+                    </div>
                     <!-- Pending Challenges -->
                     <div id="h2hPending" class="h2h-section-group"></div>
                     <!-- Active / Completed Challenges -->

@@ -202,45 +202,58 @@ const _fetchFromAPI = async () => {
       originalGameweek: match.matchday
     }));
 
-  // Fix delayed/rescheduled matches: if a match date falls outside its
-  // original gameweek's date window, move it to the gameweek whose dates it fits.
-  // Build date ranges per gameweek from the majority of matches.
+  // Fix delayed/rescheduled matches: detect matches whose date falls far outside
+  // their gameweek's normal window and reassign them to the correct gameweek.
+  // Two-pass approach to avoid outliers polluting date ranges.
+
+  // Pass 1: compute each GW's "core" date cluster using median, excluding outliers
   const gwDates = {};
   mapped.forEach(m => {
     if (!gwDates[m.gameweek]) gwDates[m.gameweek] = [];
-    gwDates[m.gameweek].push(new Date(m.date));
-  });
-  const gwRanges = {};
-  Object.entries(gwDates).forEach(([gw, dates]) => {
-    dates.sort((a, b) => a - b);
-    // Use the middle 80% of matches to define the range (excludes outliers)
-    const start = dates[0];
-    const end = dates[dates.length - 1];
-    gwRanges[gw] = { start, end };
+    gwDates[m.gameweek].push(new Date(m.date).getTime());
   });
 
-  // Detect outlier matches: if a match date is > 5 days after its GW's last match,
-  // it was likely rescheduled. Reassign it to the GW whose date range it fits.
+  const gwCoreRanges = {};
+  Object.entries(gwDates).forEach(([gw, timestamps]) => {
+    timestamps.sort((a, b) => a - b);
+    const median = timestamps[Math.floor(timestamps.length / 2)];
+    // Core matches: within 4 days of the median (normal GW spans ~3 days)
+    const CORE_WINDOW = 4 * 24 * 60 * 60 * 1000;
+    const core = timestamps.filter(t => Math.abs(t - median) <= CORE_WINDOW);
+    if (core.length > 0) {
+      gwCoreRanges[gw] = {
+        start: core[0],
+        end: core[core.length - 1],
+        median: median
+      };
+    }
+  });
+
+  // Pass 2: any match > 5 days from its GW's core range is likely rescheduled
+  const DAY_MS = 24 * 60 * 60 * 1000;
   mapped.forEach(m => {
-    const myRange = gwRanges[m.gameweek];
+    const myRange = gwCoreRanges[m.gameweek];
     if (!myRange) return;
-    const matchDate = new Date(m.date);
-    const daysDiff = (matchDate - myRange.end) / (1000 * 60 * 60 * 24);
-    
-    if (daysDiff > 5) {
-      // This match was rescheduled — find the correct GW
+    const mt = new Date(m.date).getTime();
+
+    // Check if this match is outside its GW's core window
+    const beforeStart = (myRange.start - mt) / DAY_MS;
+    const afterEnd = (mt - myRange.end) / DAY_MS;
+    const isOutlier = beforeStart > 5 || afterEnd > 5;
+
+    if (isOutlier) {
+      // Find the GW whose core range best fits this match date
       let bestGW = m.gameweek;
       let bestDist = Infinity;
-      Object.entries(gwRanges).forEach(([gw, range]) => {
-        if (matchDate >= new Date(range.start.getTime() - 2 * 86400000) && 
-            matchDate <= new Date(range.end.getTime() + 2 * 86400000)) {
-          const mid = new Date((range.start.getTime() + range.end.getTime()) / 2);
-          const dist = Math.abs(matchDate - mid);
+      Object.entries(gwCoreRanges).forEach(([gw, range]) => {
+        // Match must be within 3 days of the GW's core window
+        if (mt >= range.start - 3 * DAY_MS && mt <= range.end + 3 * DAY_MS) {
+          const dist = Math.abs(mt - range.median);
           if (dist < bestDist) { bestDist = dist; bestGW = parseInt(gw); }
         }
       });
       if (bestGW !== m.gameweek) {
-        console.log(`[Cache] Rescheduled: ${m.homeTeam} vs ${m.awayTeam} moved from GW${m.gameweek} → GW${bestGW}`);
+        console.log(`[Cache] Rescheduled: ${m.homeTeam} vs ${m.awayTeam} moved from GW${m.originalGameweek} → GW${bestGW}`);
         m.gameweek = bestGW;
       }
     }
@@ -497,8 +510,8 @@ app.get('/api/leaderboard', async (req, res) => {
       // Update user score in database
       await db.updateUserScore(user.id, totalScore);
       
-      // Get user title
-      const titleKey = user.title || null;
+      // Get user title from file-based storage
+      const titleKey = await db.getUserTitle(user.id);
       const titleBadge = titleKey && BADGES[titleKey] ? BADGES[titleKey] : null;
 
       // Add user to leaderboard regardless of score
@@ -790,11 +803,13 @@ async function checkAndAwardBadges(userId) {
     if (predCount >= 300) { const r = await db.awardBadge(userId, 'three_hundred_predictions'); if (r.awarded) awarded.push('three_hundred_predictions'); }
     if (predCount >= 380) { const r = await db.awardBadge(userId, 'full_season'); if (r.awarded) awarded.push('full_season'); }
 
-    // Streak badges
-    if (streak && streak.current_streak >= 3) { const r = await db.awardBadge(userId, 'streak_3'); if (r.awarded) awarded.push('streak_3'); }
+    // Streak badges (updated to match new BADGES tiers)
     if (streak && streak.current_streak >= 5) { const r = await db.awardBadge(userId, 'streak_5'); if (r.awarded) awarded.push('streak_5'); }
+    if (streak && streak.current_streak >= 7) { const r = await db.awardBadge(userId, 'streak_7'); if (r.awarded) awarded.push('streak_7'); }
     if (streak && streak.current_streak >= 10) { const r = await db.awardBadge(userId, 'streak_10'); if (r.awarded) awarded.push('streak_10'); }
+    if (streak && streak.current_streak >= 15) { const r = await db.awardBadge(userId, 'streak_15'); if (r.awarded) awarded.push('streak_15'); }
     if (streak && streak.current_streak >= 20) { const r = await db.awardBadge(userId, 'streak_20'); if (r.awarded) awarded.push('streak_20'); }
+    if (streak && streak.current_streak >= 30) { const r = await db.awardBadge(userId, 'streak_30'); if (r.awarded) awarded.push('streak_30'); }
 
     // Points milestones
     if (user && user.score >= 50) { const r = await db.awardBadge(userId, 'fifty_points'); if (r.awarded) awarded.push('fifty_points'); }
@@ -804,6 +819,7 @@ async function checkAndAwardBadges(userId) {
     if (user && user.score >= 400) { const r = await db.awardBadge(userId, 'four_hundred_points'); if (r.awarded) awarded.push('four_hundred_points'); }
     if (user && user.score >= 500) { const r = await db.awardBadge(userId, 'five_hundred_points'); if (r.awarded) awarded.push('five_hundred_points'); }
     if (user && user.score >= 600) { const r = await db.awardBadge(userId, 'six_hundred_points'); if (r.awarded) awarded.push('six_hundred_points'); }
+    if (user && user.score >= 700) { const r = await db.awardBadge(userId, 'seven_hundred_points'); if (r.awarded) awarded.push('seven_hundred_points'); }
 
     // H2H milestones
     const h2hWins = await db.getUserH2HWins(userId);
@@ -811,6 +827,7 @@ async function checkAndAwardBadges(userId) {
     if (h2hWins >= 5) { const r = await db.awardBadge(userId, 'h2h_5_wins'); if (r.awarded) awarded.push('h2h_5_wins'); }
     if (h2hWins >= 10) { const r = await db.awardBadge(userId, 'h2h_10_wins'); if (r.awarded) awarded.push('h2h_10_wins'); }
     if (h2hWins >= 20) { const r = await db.awardBadge(userId, 'h2h_20_wins'); if (r.awarded) awarded.push('h2h_20_wins'); }
+    if (h2hWins >= 30) { const r = await db.awardBadge(userId, 'h2h_30_wins'); if (r.awarded) awarded.push('h2h_30_wins'); }
   } catch (e) {
     console.error('Badge check error:', e);
   }
@@ -1234,11 +1251,16 @@ app.post('/api/h2h/:id/decline', authenticateToken, async (req, res) => {
   }
 });
 
-// Get user's H2H challenges
+// Get user's H2H challenges (optionally filtered by gameweek)
 app.get('/api/h2h', authenticateToken, async (req, res) => {
   try {
     const challenges = await db.getUserH2HChallenges(req.userId);
-    res.json(challenges);
+    const gwFilter = req.query.gameweek ? parseInt(req.query.gameweek) : null;
+    if (gwFilter) {
+      res.json(challenges.filter(c => c.gameweek === gwFilter));
+    } else {
+      res.json(challenges);
+    }
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch challenges' });
   }
