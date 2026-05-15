@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const axios = require('axios');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 // Auto-select database: use Supabase if configured, otherwise SQLite for local dev
@@ -154,13 +156,37 @@ const authenticateToken = (req, res, next) => {
 };
 
 // ===== API RESPONSE CACHE =====
-// Cache all matches in memory; refresh every 3 minutes to stay within API rate limits.
-// Football-Data.org free tier: 10 requests/minute. We use ~1 request per refresh cycle.
+// Cache all matches in memory + disk; refresh every 3 minutes.
+// Disk persistence ensures match data survives restarts and API failures.
+const MATCH_CACHE_FILE = path.join(__dirname, 'match-cache.json');
+
 const matchCache = {
-  allMatches: null,       // full season data
-  lastFetch: 0,           // timestamp of last successful API call
-  TTL: 3 * 60 * 1000,     // 3 minutes
+  allMatches: null,
+  lastFetch: 0,
+  TTL: 3 * 60 * 1000,
   refreshTimer: null
+};
+
+// Load cache from disk on startup
+try {
+  if (fs.existsSync(MATCH_CACHE_FILE)) {
+    const cached = JSON.parse(fs.readFileSync(MATCH_CACHE_FILE, 'utf8'));
+    if (cached && Array.isArray(cached.matches) && cached.matches.length > 0) {
+      matchCache.allMatches = cached.matches;
+      matchCache.lastFetch = cached.lastFetch || 0;
+      console.log(`[Cache] Loaded ${cached.matches.length} matches from disk (cached ${new Date(matchCache.lastFetch).toISOString()})`);
+    }
+  }
+} catch (e) {
+  console.error('[Cache] Failed to load disk cache:', e.message);
+}
+
+const saveCacheToDisk = (matches) => {
+  try {
+    fs.writeFileSync(MATCH_CACHE_FILE, JSON.stringify({ matches, lastFetch: Date.now() }));
+  } catch (e) {
+    console.error('[Cache] Failed to save cache to disk:', e.message);
+  }
 };
 
 // Raw API fetch – only called by the cache layer, never directly by endpoints
@@ -168,8 +194,7 @@ const _fetchFromAPI = async () => {
   const apiKey = process.env.FOOTBALL_API_KEY;
   
   if (!apiKey || apiKey === 'your-api-key-here') {
-    console.log('[Cache] No API key – using mock data');
-    return generateMockSeasonData();
+    throw new Error('No API key configured');
   }
   
   const season = '2025';
@@ -182,8 +207,7 @@ const _fetchFromAPI = async () => {
   });
   
   if (!response.data.matches || response.data.matches.length === 0) {
-    console.log('[Cache] Empty API response – using mock data');
-    return generateMockSeasonData();
+    throw new Error('Empty API response');
   }
   
   console.log(`[Cache] Got ${response.data.matches.length} matches from API`);
@@ -281,14 +305,11 @@ const refreshMatchCache = async () => {
     const data = await _fetchFromAPI();
     matchCache.allMatches = data;
     matchCache.lastFetch = Date.now();
+    saveCacheToDisk(data);
     console.log(`[Cache] Refreshed: ${data.length} matches cached at ${new Date().toISOString()}`);
   } catch (error) {
-    console.error('[Cache] Refresh failed:', error.message);
-    // Keep stale data if available; fall back to mock if not
-    if (!matchCache.allMatches) {
-      matchCache.allMatches = generateMockSeasonData();
-      matchCache.lastFetch = Date.now();
-    }
+    console.error('[Cache] Refresh failed:', error.message, '- keeping existing cache');
+    // Keep stale data; do NOT fall back to mock (causes wrong GW detection)
   }
 };
 
@@ -307,9 +328,10 @@ const fetchPremierLeagueMatches = async (gameweek = null) => {
   if (!matchCache.allMatches) {
     await refreshMatchCache();
   }
-  
-  const allMatches = matchCache.allMatches || generateMockSeasonData();
-  
+
+  // Never fall back to mock data - return empty rather than fake GW6 data
+  const allMatches = matchCache.allMatches || [];
+
   if (gameweek) {
     return allMatches.filter(m => m.gameweek === gameweek);
   }
@@ -1158,10 +1180,8 @@ async function processH2HChallenges() {
     for (let gw = 1; gw <= currentGW; gw++) {
       await db.deleteExpiredH2HChallenges(gw);
     }
-    // Cleanup: delete completed challenges from past GWs (scores already in leaderboard)
-    for (let gw = 1; gw < currentGW; gw++) {
-      await db.deleteCompletedH2HChallenges(gw);
-    }
+    // NOTE: Do NOT delete completed challenges - they are needed for the H2H leaderboard.
+    // The leaderboard aggregates wins/draws/losses/glory from completed challenges.
   } catch (e) {
     console.error('[H2H] Process error:', e.message);
   }

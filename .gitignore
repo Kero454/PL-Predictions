@@ -4,3 +4,5 @@ predictions.db
 *.db-journal
 .vercel
 score-adjustments.json
+user-titles.json
+match-cache.json
