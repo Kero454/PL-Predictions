@@ -24,7 +24,9 @@ const TEAM_CRESTS = {
     'Wolverhampton':       { id: 76,   abbr: 'WOL', color: '#FDB462' },
     'Burnley':             { id: 328,  abbr: 'BUR', color: '#6C1D45' },
     'Leeds United':        { id: 341,  abbr: 'LEE', color: '#FFCD00' },
-    'Sunderland':          { id: 71,   abbr: 'SUN', color: '#EB172B' }
+    'Sunderland':          { id: 71,   abbr: 'SUN', color: '#EB172B' },
+    'Hull City':           { id: 322,  abbr: 'HUL', color: '#F5A12D' },
+    'Coventry City':       { id: 1076, abbr: 'COV', color: '#78D0F1' }
 };
 
 // Name aliases to normalize various team name formats
@@ -90,6 +92,12 @@ const TEAM_NAME_ALIASES = {
     'leeds': 'Leeds United',
     'sunderland afc': 'Sunderland',
     'sunderland': 'Sunderland',
+    'hull city afc': 'Hull City',
+    'hull city': 'Hull City',
+    'hull': 'Hull City',
+    'coventry city fc': 'Coventry City',
+    'coventry city': 'Coventry City',
+    'coventry': 'Coventry City',
     'luton town fc': 'Luton Town',
     'luton town': 'Luton Town',
     'sheffield united fc': 'Sheffield United',

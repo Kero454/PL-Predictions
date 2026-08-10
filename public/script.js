@@ -539,7 +539,7 @@ function createLeaderboardItem(player, rank) {
     else if (rank === 3) rankClass = 'bronze';
     
     const titleLine = player.titleName 
-        ? `<div class="player-title">${player.titleName}</div>` 
+        ? `<div class="player-title" style="color: ${player.titleColor || '#888'};">${player.titleName}</div>` 
         : '';
     item.innerHTML = `
         <div class="player-info">
