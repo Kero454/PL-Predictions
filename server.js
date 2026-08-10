@@ -197,7 +197,7 @@ const _fetchFromAPI = async () => {
     throw new Error('No API key configured');
   }
   
-  const season = '2025';
+  const season = '2026';
   const url = `https://api.football-data.org/v4/competitions/PL/matches?season=${season}`;
   
   console.log('[Cache] Fetching all matches from API...');
@@ -228,7 +228,7 @@ const _fetchFromAPI = async () => {
 
   // Manual score overrides (temporary fixes until API corrects itself)
   const SCORE_OVERRIDES = [
-    { homeTeam: 'West Ham United FC', awayTeam: 'Arsenal FC', gameweek: 36, homeScore: 0, awayScore: 1 },
+    // Add entries here if needed: { homeTeam: '...', awayTeam: '...', gameweek: N, homeScore: X, awayScore: Y }
   ];
   SCORE_OVERRIDES.forEach(ov => {
     const m = mapped.find(m => m.homeTeam === ov.homeTeam && m.awayTeam === ov.awayTeam && m.gameweek === ov.gameweek);
