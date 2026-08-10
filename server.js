@@ -765,7 +765,7 @@ const BADGES = {
   ten_predictions:            { name: 'Regular',             icon: 'fas fa-fire',              description: 'Made 10 predictions',                color: '#FF6B35', tier: 'beginner' },
   fifty_predictions:          { name: 'Dedicated',           icon: 'fas fa-medal',             description: 'Made 50 predictions',                color: '#C0C0C0', tier: 'beginner' },
   full_gameweek:              { name: 'Full Card',           icon: 'fas fa-clipboard-check',   description: 'Predicted all 10 matches in a gameweek', color: '#4CAF50', tier: 'beginner' },
-  league_creator:             { name: 'Founder',             icon: 'fas fa-users',             description: 'Created a league',                   color: '#4169E1', tier: 'beginner' },
+  league_creator:             { name: 'Founder',             icon: 'fas fa-users',             description: 'Created a league',                   color: '#FFD700', tier: 'beginner' },
   fifty_points:               { name: 'Half Century',        icon: 'fas fa-coins',             description: 'Reached 50 total points',            color: '#FFC107', tier: 'beginner' },
 
   // ── VETERAN: Requires consistent play over weeks ──
@@ -810,7 +810,11 @@ const BADGES = {
   h2h_20_wins:                { name: 'Warlord',              icon: 'fas fa-chess-queen',       description: 'Won 20 H2H challenges',              color: '#B71C1C', tier: 'mythic' },
   h2h_30_wins:                { name: 'Supreme',              icon: 'fas fa-skull',             description: 'Won 30 H2H challenges',              color: '#4A0072', tier: 'mythic' },
   ten_weekly_wins:            { name: 'Dynasty',              icon: 'fas fa-chess-rook',        description: 'Won 10 gameweeks',                   color: '#BF360C', tier: 'mythic' },
-  season_champion:            { name: 'Season Champion',      icon: 'fas fa-crown',             description: 'Won the overall season leaderboard', color: '#FFD700', tier: 'mythic' }
+  season_champion:            { name: 'Season Champion',      icon: 'fas fa-crown',             description: 'Won the overall season leaderboard', color: '#FFD700', tier: 'mythic' },
+
+  // ── SPECIAL: Custom titles awarded manually ──
+  champion_2025_26:           { name: 'Champion 2025/26',     icon: 'fas fa-crown',             description: 'Won the 2025/26 season',             color: '#FFD700', tier: 'mythic' },
+  runner_up_2025_26:          { name: 'Runner Up 2025/26',    icon: 'fas fa-medal',             description: 'Runner up of the 2025/26 season',   color: '#C0C0C0', tier: 'mythic' }
 };
 
 // Helper to generate random invite code
