@@ -1307,10 +1307,10 @@ app.post('/api/h2h/challenge', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: `You can only challenge for Gameweek ${challengeGW}` });
     }
 
-    // Enforce: max 2 challenge PROPOSALS per gameweek per user
+    // Enforce: max 1 challenge PROPOSAL per gameweek per user
     const proposalCount = await db.getUserH2HProposalCountForGW(req.userId, gameweek);
-    if (proposalCount >= 2) {
-      return res.status(400).json({ error: 'You can only send 2 challenge proposals per gameweek' });
+    if (proposalCount >= 1) {
+      return res.status(400).json({ error: 'You can only send 1 challenge per gameweek' });
     }
 
     const result = await db.createH2HChallenge(req.userId, opponentId, gameweek);
@@ -1344,10 +1344,10 @@ app.post('/api/h2h/:id/accept', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'This gameweek has already started — challenge expired' });
     }
 
-    // Enforce: max 5 accepted challenges per GW for the accepting user
+    // Enforce: max 1 accepted challenge per GW for the accepting user
     const acceptedCount = await db.getUserH2HAcceptedCountForGW(req.userId, challenge.gameweek);
-    if (acceptedCount >= 5) {
-      return res.status(400).json({ error: 'You can only accept up to 5 challenges per gameweek' });
+    if (acceptedCount >= 1) {
+      return res.status(400).json({ error: 'You can only accept 1 challenge per gameweek' });
     }
 
     await db.acceptH2HChallenge(parseInt(req.params.id), req.userId);
@@ -1412,9 +1412,9 @@ app.get('/api/h2h/info', authenticateToken, async (req, res) => {
       currentGameweek: currentGW,
       challengeGameweek: challengeGW,
       proposalsSent: proposalCount,
-      maxProposals: 2,
+      maxProposals: 1,
       challengesAccepted: acceptedCount,
-      maxAccepts: 5
+      maxAccepts: 1
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get H2H info' });
