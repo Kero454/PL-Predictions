@@ -609,8 +609,17 @@ async function handlePredictionSubmit(e) {
     const homeScore = parseInt(document.getElementById('homeScore').value);
     const awayScore = parseInt(document.getElementById('awayScore').value);
     const isDoubler = document.getElementById('doublerCheckbox').checked;
-    const firstTeamToScore = document.getElementById('firstTeamToScore').value || null;
-    const firstScorer = document.getElementById('firstScorer').value.trim() || null;
+    const firstTeamToScore = document.getElementById('firstTeamToScore').value;
+    const firstScorer = document.getElementById('firstScorer').value;
+
+    if (!firstTeamToScore) {
+        showError('Please select the first team to score');
+        return;
+    }
+    if (!firstScorer) {
+        showError('Please select the first player to score');
+        return;
+    }
     
     try {
         const token = localStorage.getItem('token');
@@ -1016,7 +1025,48 @@ function openPredictionModal(matchId, homeTeam, awayTeam, matchDate, gameweek) {
     document.getElementById('awayScore').value = '';
     document.getElementById('doublerCheckbox').checked = false;
     document.getElementById('firstTeamToScore').value = '';
-    document.getElementById('firstScorer').value = '';
+    const scorerSelect = document.getElementById('firstScorer');
+    scorerSelect.innerHTML = '<option value="" disabled selected>— Loading players —</option>';
+
+    // Fetch squad data and populate player dropdown
+    fetch(`/api/squad/${matchId}`)
+      .then(r => r.json())
+      .then(data => {
+        scorerSelect.innerHTML = '<option value="" disabled selected>— Select player —</option>';
+        if (data.home && data.away) {
+          const homeGroup = document.createElement('optgroup');
+          homeGroup.label = data.home.team;
+          data.home.players.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.name;
+            opt.textContent = p.name;
+            homeGroup.appendChild(opt);
+          });
+          const awayGroup = document.createElement('optgroup');
+          awayGroup.label = data.away.team;
+          data.away.players.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.name;
+            opt.textContent = p.name;
+            awayGroup.appendChild(opt);
+          });
+          scorerSelect.appendChild(homeGroup);
+          scorerSelect.appendChild(awayGroup);
+          // Add "No goals" option at the end
+          const noGoalOpt = document.createElement('option');
+          noGoalOpt.value = 'no_goal';
+          noGoalOpt.textContent = 'No goals (0-0)';
+          scorerSelect.appendChild(noGoalOpt);
+        }
+        // Re-apply existing prediction value if editing
+        const existing = userPredictions[matchId];
+        if (existing && existing.firstScorer) {
+          scorerSelect.value = existing.firstScorer;
+        }
+      })
+      .catch(() => {
+        scorerSelect.innerHTML = '<option value="" disabled selected>— Could not load players —</option>';
+      });
     
     // Update doubler hint
     const doublerHint = document.getElementById('doublerHint');
@@ -1037,7 +1087,7 @@ function openPredictionModal(matchId, homeTeam, awayTeam, matchDate, gameweek) {
         document.getElementById('awayScore').value = existing.awayScore;
         document.getElementById('doublerCheckbox').checked = !!existing.isDoubler;
         if (existing.firstTeamToScore) document.getElementById('firstTeamToScore').value = existing.firstTeamToScore;
-        if (existing.firstScorer) document.getElementById('firstScorer').value = existing.firstScorer;
+        // firstScorer is pre-filled in the async squad fetch callback above
     }
     
     // Show modal

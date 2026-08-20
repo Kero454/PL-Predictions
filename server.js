@@ -221,6 +221,8 @@ const _fetchFromAPI = async () => {
       id: match.id,
       homeTeam: match.homeTeam.name,
       awayTeam: match.awayTeam.name,
+      homeTeamId: match.homeTeam.id,
+      awayTeamId: match.awayTeam.id,
       date: match.utcDate,
       status: match.status === 'FINISHED' ? 'finished' : 
               match.status === 'IN_PLAY' ? 'live' : 'upcoming',
@@ -424,6 +426,52 @@ app.get('/api/matches', async (req, res) => {
   }
 });
 
+// Squad cache: { teamId: { players: [...], fetchedAt: timestamp } }
+const squadCache = {};
+const SQUAD_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+async function fetchSquadForTeam(teamId) {
+  if (squadCache[teamId] && (Date.now() - squadCache[teamId].fetchedAt) < SQUAD_CACHE_TTL) {
+    return squadCache[teamId].players;
+  }
+  const apiKey = process.env.FOOTBALL_API_KEY;
+  const url = `https://api.football-data.org/v4/teams/${teamId}`;
+  const response = await axios.get(url, {
+    headers: { 'X-Auth-Token': apiKey },
+    timeout: 10000
+  });
+  const posOrder = { 'Offence': 1, 'Midfield': 2, 'Defence': 3, 'Goalkeeper': 4 };
+  const squad = (response.data.squad || [])
+    .filter(p => p.position && p.position !== 'Coach')
+    .map(p => ({ name: p.name, position: p.position }))
+    .sort((a, b) => (posOrder[a.position] || 5) - (posOrder[b.position] || 5));
+  squadCache[teamId] = { players: squad, fetchedAt: Date.now() };
+  return squad;
+}
+
+// Get players for both teams in a match
+app.get('/api/squad/:matchId', async (req, res) => {
+  try {
+    const matchId = parseInt(req.params.matchId);
+    const allMatches = await fetchPremierLeagueMatches();
+    const match = allMatches.find(m => m.id === matchId);
+    if (!match) return res.status(404).json({ error: 'Match not found' });
+
+    const [homePlayers, awayPlayers] = await Promise.all([
+      fetchSquadForTeam(match.homeTeamId),
+      fetchSquadForTeam(match.awayTeamId)
+    ]);
+
+    res.json({
+      home: { team: match.homeTeam, players: homePlayers },
+      away: { team: match.awayTeam, players: awayPlayers }
+    });
+  } catch (error) {
+    console.error('Squad endpoint error:', error.message);
+    res.status(500).json({ error: 'Failed to fetch squad data' });
+  }
+});
+
 // Get all gameweeks with basic info
 app.get('/api/gameweeks', async (req, res) => {
   try {
@@ -473,10 +521,13 @@ app.post('/api/predictions', authenticateToken, async (req, res) => {
       await db.saveDoubler(req.userId, gameweek, matchId);
     }
     
-    // Normalize optional bonus predictions
+    // Validate required bonus predictions
     const ftts = (firstTeamToScore === 'home' || firstTeamToScore === 'away' || firstTeamToScore === 'none')
       ? firstTeamToScore : null;
     const scorer = (typeof firstScorer === 'string' && firstScorer.trim()) ? firstScorer.trim() : null;
+    if (!ftts || !scorer) {
+      return res.status(400).json({ error: 'First team to score and first player to score are required' });
+    }
     
     // Save prediction to database
     await db.savePrediction(req.userId, matchId, parseInt(homeScore), parseInt(awayScore), isDoubler, gameweek, ftts, scorer);
