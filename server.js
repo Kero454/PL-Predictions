@@ -1217,6 +1217,9 @@ async function scoreH2HChallenge(challenge) {
   const challengerPreds = await db.getUserPredictions(challenge.challenger_id);
   const opponentPreds = await db.getUserPredictions(challenge.opponent_id);
 
+  // Resolve first-goal data for bonus scoring
+  const firstGoalByMatch = await getFirstGoalMap(finishedMatches);
+
   let challengerScore = 0;
   let opponentScore = 0;
 
@@ -1224,11 +1227,23 @@ async function scoreH2HChallenge(challenge) {
     const cPred = challengerPreds.find(p => p.matchId == match.id && p.gameweek === challenge.gameweek);
     const oPred = opponentPreds.find(p => p.matchId == match.id && p.gameweek === challenge.gameweek);
 
+    const fg = firstGoalByMatch[match.id];
+
     if (cPred) {
-      challengerScore += calculatePoints({ homeScore: cPred.homeScore, awayScore: cPred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
+      let pts = calculatePoints({ homeScore: cPred.homeScore, awayScore: cPred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
+      if (fg && fg.resolved) {
+        pts += goalEvents.scoreFirstTeam(cPred.firstTeamToScore, fg.firstTeam);
+        pts += goalEvents.scoreFirstScorer(cPred.firstScorer, fg.firstScorer);
+      }
+      challengerScore += pts;
     }
     if (oPred) {
-      opponentScore += calculatePoints({ homeScore: oPred.homeScore, awayScore: oPred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
+      let pts = calculatePoints({ homeScore: oPred.homeScore, awayScore: oPred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
+      if (fg && fg.resolved) {
+        pts += goalEvents.scoreFirstTeam(oPred.firstTeamToScore, fg.firstTeam);
+        pts += goalEvents.scoreFirstScorer(oPred.firstScorer, fg.firstScorer);
+      }
+      opponentScore += pts;
     }
   }
 
