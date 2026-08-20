@@ -426,27 +426,84 @@ app.get('/api/matches', async (req, res) => {
   }
 });
 
-// Squad cache: { teamId: { players: [...], fetchedAt: timestamp } }
-const squadCache = {};
-const SQUAD_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+// Squad cache: all PL teams fetched in one call, cached to disk
+const SQUAD_CACHE_FILE = path.join(__dirname, 'squad-cache.json');
+const SQUAD_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+let allSquads = {}; // { teamId: { team, players: [...] } }
+let squadCacheFetchedAt = 0;
 
-async function fetchSquadForTeam(teamId) {
-  if (squadCache[teamId] && (Date.now() - squadCache[teamId].fetchedAt) < SQUAD_CACHE_TTL) {
-    return squadCache[teamId].players;
-  }
+function loadSquadCacheFromDisk() {
+  try {
+    if (fs.existsSync(SQUAD_CACHE_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(SQUAD_CACHE_FILE, 'utf8'));
+      allSquads = raw.squads || {};
+      squadCacheFetchedAt = raw.fetchedAt || 0;
+      console.log(`[Squad] Loaded ${Object.keys(allSquads).length} team squads from disk cache`);
+      applySquadOverrides();
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function refreshAllSquads() {
   const apiKey = process.env.FOOTBALL_API_KEY;
-  const url = `https://api.football-data.org/v4/teams/${teamId}`;
+  const url = `https://api.football-data.org/v4/competitions/PL/teams?season=${PL_SEASON_YEAR}`;
   const response = await axios.get(url, {
     headers: { 'X-Auth-Token': apiKey },
-    timeout: 10000
+    timeout: 15000
   });
   const posOrder = { 'Offence': 1, 'Midfield': 2, 'Defence': 3, 'Goalkeeper': 4 };
-  const squad = (response.data.squad || [])
-    .filter(p => p.position && p.position !== 'Coach')
-    .map(p => ({ name: p.name, position: p.position }))
-    .sort((a, b) => (posOrder[a.position] || 5) - (posOrder[b.position] || 5));
-  squadCache[teamId] = { players: squad, fetchedAt: Date.now() };
-  return squad;
+  const teams = response.data.teams || [];
+  const newSquads = {};
+  for (const team of teams) {
+    const players = (team.squad || [])
+      .filter(p => p.position && p.position !== 'Coach')
+      .map(p => ({ name: p.name, position: p.position }))
+      .sort((a, b) => (posOrder[a.position] || 5) - (posOrder[b.position] || 5));
+    newSquads[team.id] = { team: team.name, players };
+  }
+  allSquads = newSquads;
+  squadCacheFetchedAt = Date.now();
+  fs.writeFileSync(SQUAD_CACHE_FILE, JSON.stringify({ squads: allSquads, fetchedAt: squadCacheFetchedAt }));
+  console.log(`[Squad] Refreshed ${Object.keys(allSquads).length} team squads from API`);
+}
+
+function applySquadOverrides() {
+  const overridesFile = path.join(__dirname, 'squad-overrides.json');
+  try {
+    if (!fs.existsSync(overridesFile)) return;
+    const overrides = JSON.parse(fs.readFileSync(overridesFile, 'utf8'));
+    const posOrder = { 'Offence': 1, 'Midfield': 2, 'Defence': 3, 'Goalkeeper': 4 };
+
+    // Remove players from teams
+    (overrides.remove || []).forEach(({ teamId, name }) => {
+      if (allSquads[teamId]) {
+        allSquads[teamId].players = allSquads[teamId].players.filter(p => p.name !== name);
+      }
+    });
+
+    // Add players to teams
+    (overrides.add || []).forEach(({ teamId, name, position }) => {
+      if (allSquads[teamId]) {
+        // Avoid duplicates
+        if (!allSquads[teamId].players.find(p => p.name === name)) {
+          allSquads[teamId].players.push({ name, position: position || 'Offence' });
+          allSquads[teamId].players.sort((a, b) => (posOrder[a.position] || 5) - (posOrder[b.position] || 5));
+        }
+      }
+    });
+  } catch (e) { /* ignore overrides errors */ }
+}
+
+// Load squad cache on startup (after applySquadOverrides is defined)
+loadSquadCacheFromDisk();
+
+async function getSquadForTeam(teamId) {
+  // Refresh if cache is stale or empty
+  if (!allSquads[teamId] || (Date.now() - squadCacheFetchedAt) > SQUAD_CACHE_TTL) {
+    await refreshAllSquads();
+    applySquadOverrides();
+  }
+  return allSquads[teamId] ? allSquads[teamId].players : [];
 }
 
 // Get players for both teams in a match
@@ -457,10 +514,8 @@ app.get('/api/squad/:matchId', async (req, res) => {
     const match = allMatches.find(m => m.id === matchId);
     if (!match) return res.status(404).json({ error: 'Match not found' });
 
-    const [homePlayers, awayPlayers] = await Promise.all([
-      fetchSquadForTeam(match.homeTeamId),
-      fetchSquadForTeam(match.awayTeamId)
-    ]);
+    const homePlayers = await getSquadForTeam(match.homeTeamId);
+    const awayPlayers = await getSquadForTeam(match.awayTeamId);
 
     res.json({
       home: { team: match.homeTeam, players: homePlayers },
