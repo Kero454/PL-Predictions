@@ -6,3 +6,4 @@ predictions.db
 score-adjustments.json
 user-titles.json
 match-cache.json
+goal-events-cache.json

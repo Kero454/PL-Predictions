@@ -480,6 +480,24 @@
                                 <input type="number" id="awayScore" min="0" max="20" required>
                             </div>
                         </div>
+                        <div class="bonus-section">
+                            <div class="bonus-title"><i class="fas fa-star"></i> Bonus Predictions <small>(optional)</small></div>
+                            <div class="form-group">
+                                <label for="firstTeamToScore">First team to score</label>
+                                <select id="firstTeamToScore">
+                                    <option value="">— No pick —</option>
+                                    <option value="home" id="fttsHomeOption"></option>
+                                    <option value="away" id="fttsAwayOption"></option>
+                                    <option value="none">No goals (0-0)</option>
+                                </select>
+                                <small class="bonus-hint">+1 point if correct</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="firstScorer">First player to score</label>
+                                <input type="text" id="firstScorer" placeholder="Type a player's name (e.g. Haaland)" autocomplete="off">
+                                <small class="bonus-hint">+2 points if correct (last name is enough)</small>
+                            </div>
+                        </div>
                         <div class="doubler-section">
                             <label class="doubler-checkbox">
                                 <input type="checkbox" id="doublerCheckbox">
@@ -496,14 +514,16 @@
                             <span>Deadline has passed! You cannot make predictions for this gameweek.</span>
                         </div>
                         <div class="points-breakdown">
-                            <h5>Scoring System (max 4 points per match):</h5>
+                            <h5>Scoring System (up to 7 points per match):</h5>
                             <ul>
                                 <li>Correct home score: <strong>1 point</strong></li>
                                 <li>Correct away score: <strong>1 point</strong></li>
                                 <li>Correct goal difference: <strong>1 point</strong></li>
                                 <li>Correct result (win/draw/loss): <strong>1 point</strong></li>
+                                <li>First team to score: <strong>1 point</strong></li>
+                                <li>First player to score: <strong>2 points</strong></li>
                             </ul>
-                            <p class="doubler-info">💡 Double points if this is your gameweek doubler!</p>
+                            <p class="doubler-info">💡 Double ALL points if this is your gameweek doubler!</p>
                         </div>
                         <button type="submit" class="btn btn-primary">Submit Prediction</button>
                     </form>

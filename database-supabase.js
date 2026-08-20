@@ -60,7 +60,7 @@ const updateUserScore = async (userId, score) => {
 
 // ===== PREDICTION OPERATIONS =====
 
-const savePrediction = async (userId, matchId, homeScore, awayScore, isDoubler, gameweek) => {
+const savePrediction = async (userId, matchId, homeScore, awayScore, isDoubler, gameweek, firstTeamToScore = null, firstScorer = null) => {
   const { data, error } = await supabase
     .from('predictions')
     .upsert(
@@ -70,6 +70,8 @@ const savePrediction = async (userId, matchId, homeScore, awayScore, isDoubler, 
         home_score: homeScore,
         away_score: awayScore,
         is_doubler: !!isDoubler,
+        first_team_to_score: firstTeamToScore,
+        first_scorer: firstScorer,
         gameweek,
         updated_at: new Date().toISOString()
       },
@@ -88,6 +90,8 @@ const _mapPrediction = (row) => ({
   homeScore: row.home_score,
   awayScore: row.away_score,
   isDoubler: row.is_doubler,
+  firstTeamToScore: row.first_team_to_score || null,
+  firstScorer: row.first_scorer || null,
   gameweek: row.gameweek
 });
 

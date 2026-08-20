@@ -7,7 +7,11 @@ const axios = require('axios');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const goalEvents = require('./goal-events');
 require('dotenv').config();
+
+// Premier League season year used by football-data.org (2026 = 2026-27 season)
+const PL_SEASON_YEAR = 2026;
 
 // Auto-select database: use Supabase if configured, otherwise SQLite for local dev
 const db = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY)
@@ -450,7 +454,7 @@ app.get('/api/gameweeks', async (req, res) => {
 // Submit prediction with deadline
 app.post('/api/predictions', authenticateToken, async (req, res) => {
   try {
-    const { matchId, homeScore, awayScore, isDoubler, gameweek } = req.body;
+    const { matchId, homeScore, awayScore, isDoubler, gameweek, firstTeamToScore, firstScorer } = req.body;
     
     // Check if deadline has passed
     const matches = await fetchPremierLeagueMatches(gameweek);
@@ -469,8 +473,13 @@ app.post('/api/predictions', authenticateToken, async (req, res) => {
       await db.saveDoubler(req.userId, gameweek, matchId);
     }
     
+    // Normalize optional bonus predictions
+    const ftts = (firstTeamToScore === 'home' || firstTeamToScore === 'away' || firstTeamToScore === 'none')
+      ? firstTeamToScore : null;
+    const scorer = (typeof firstScorer === 'string' && firstScorer.trim()) ? firstScorer.trim() : null;
+    
     // Save prediction to database
-    await db.savePrediction(req.userId, matchId, parseInt(homeScore), parseInt(awayScore), isDoubler, gameweek);
+    await db.savePrediction(req.userId, matchId, parseInt(homeScore), parseInt(awayScore), isDoubler, gameweek, ftts, scorer);
     
     // Check and award badges
     const newBadges = await checkAndAwardBadges(req.userId);
@@ -512,6 +521,10 @@ app.get('/api/leaderboard', async (req, res) => {
     const allUsers = await db.getAllUsers();
     const allPredictions = await db.getAllPredictions();
     
+    // Resolve first-goal data (team + scorer) once per finished match via TheSportsDB.
+    // Results are cached in the goal-events module, so this is cheap on repeat calls.
+    const firstGoalByMatch = await getFirstGoalMap(finishedMatches);
+    
     const leaderboard = [];
     
     // Ensure ALL users appear in leaderboard, even with 0 points
@@ -530,8 +543,20 @@ app.get('/api/leaderboard', async (req, res) => {
           
           // Check if this was a doubler match
           const doubler = await db.getUserDoubler(user.id, match.gameweek);
-          if (doubler && doubler.matchId == match.id) {
+          const isDoublerMatch = doubler && doubler.matchId == match.id;
+          if (isDoublerMatch) {
             matchScore *= 2;
+          }
+          
+          // Bonus predictions: first team to score (1pt) + first scorer (2pts).
+          // These are also doubled if this is the user's doubler match.
+          const fg = firstGoalByMatch[match.id];
+          if (fg && fg.resolved) {
+            let bonus = 0;
+            bonus += goalEvents.scoreFirstTeam(prediction.firstTeamToScore, fg.firstTeam);
+            bonus += goalEvents.scoreFirstScorer(prediction.firstScorer, fg.firstScorer);
+            if (isDoublerMatch) bonus *= 2;
+            matchScore += bonus;
           }
           
           totalScore += matchScore;
@@ -1747,6 +1772,26 @@ io.on('connection', (socket) => {
     console.log('User disconnected:', socket.id);
   });
 });
+
+// Build a map of matchId -> { firstTeam, firstScorer, resolved } for finished
+// matches, using TheSportsDB via the goal-events module. Resolved results are
+// permanently cached inside the module, so repeat calls are cheap.
+const getFirstGoalMap = async (finishedMatches) => {
+  const map = {};
+  for (const match of finishedMatches) {
+    try {
+      map[match.id] = await goalEvents.getFirstGoal(
+        PL_SEASON_YEAR,
+        String(match.id),
+        match.homeTeam,
+        match.awayTeam
+      );
+    } catch (e) {
+      map[match.id] = { firstTeam: null, firstScorer: null, resolved: false };
+    }
+  }
+  return map;
+};
 
 // Function to calculate points based on new scoring system
 const calculatePoints = (prediction, actualHomeScore, actualAwayScore) => {

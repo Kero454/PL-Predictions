@@ -1,0 +1,244 @@
+// Goal Events module - uses TheSportsDB (free) to determine the first team
+// to score and the first goalscorer for each Premier League match.
+// This is a SECONDARY data source. football-data.org remains the primary
+// source for fixtures, scores, and gameweeks.
+
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+
+const TSDB_KEY = process.env.THESPORTSDB_KEY || '3'; // '3' = free test key
+const BASE = `https://www.thesportsdb.com/api/v1/json/${TSDB_KEY}`;
+const PL_LEAGUE_ID = '4328';
+
+const EVENTS_CACHE_FILE = path.join(__dirname, 'goal-events-cache.json');
+const EVENTS_TTL_MS = 30 * 60 * 1000; // refresh season event list every 30 min
+
+// In-memory caches
+let seasonEventsCache = { season: null, fetchedAt: 0, events: [] };
+// Permanent per-match first-goal cache: { [matchKey]: { firstTeam, firstScorer, resolved } }
+let firstGoalCache = {};
+// Squad cache: { [teamKey]: { fetchedAt, players: [names] } }
+let squadCache = {};
+
+// ---- Persistence ----
+function loadCache() {
+  try {
+    if (fs.existsSync(EVENTS_CACHE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(EVENTS_CACHE_FILE, 'utf8'));
+      firstGoalCache = data.firstGoalCache || {};
+      console.log(`[GoalEvents] Loaded ${Object.keys(firstGoalCache).length} cached first-goal results`);
+    }
+  } catch (e) {
+    console.error('[GoalEvents] Failed to load cache:', e.message);
+  }
+}
+
+function saveCache() {
+  try {
+    fs.writeFileSync(EVENTS_CACHE_FILE, JSON.stringify({ firstGoalCache }), 'utf8');
+  } catch (e) {
+    console.error('[GoalEvents] Failed to save cache:', e.message);
+  }
+}
+
+loadCache();
+
+// ---- Team name normalization ----
+// Reduce any team name (football-data.org full names OR TheSportsDB names) to
+// a canonical key so we can match matches across the two APIs.
+function normalizeTeam(name) {
+  if (!name) return '';
+  let n = name.toLowerCase().trim();
+  // strip accents
+  n = n.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  // remove common suffixes/words
+  n = n.replace(/\b(fc|afc|cf)\b/g, '');
+  n = n.replace(/&/g, 'and');
+  n = n.replace(/[^a-z0-9 ]/g, '');
+  n = n.replace(/\s+/g, ' ').trim();
+
+  const aliases = {
+    'arsenal': 'arsenal',
+    'aston villa': 'aston villa',
+    'bournemouth': 'bournemouth',
+    'brentford': 'brentford',
+    'brighton and hove albion': 'brighton',
+    'brighton hove albion': 'brighton',
+    'brighton': 'brighton',
+    'burnley': 'burnley',
+    'chelsea': 'chelsea',
+    'coventry city': 'coventry',
+    'coventry': 'coventry',
+    'crystal palace': 'crystal palace',
+    'everton': 'everton',
+    'fulham': 'fulham',
+    'hull city': 'hull',
+    'hull': 'hull',
+    'ipswich town': 'ipswich',
+    'ipswich': 'ipswich',
+    'leeds united': 'leeds',
+    'leeds': 'leeds',
+    'leicester city': 'leicester',
+    'leicester': 'leicester',
+    'liverpool': 'liverpool',
+    'manchester city': 'man city',
+    'man city': 'man city',
+    'manchester united': 'man united',
+    'man united': 'man united',
+    'man utd': 'man united',
+    'newcastle united': 'newcastle',
+    'newcastle': 'newcastle',
+    'nottingham forest': 'nottingham forest',
+    'nottm forest': 'nottingham forest',
+    'sheffield united': 'sheffield united',
+    'southampton': 'southampton',
+    'sunderland': 'sunderland',
+    'tottenham hotspur': 'tottenham',
+    'tottenham': 'tottenham',
+    'spurs': 'tottenham',
+    'west ham united': 'west ham',
+    'west ham': 'west ham',
+    'wolverhampton wanderers': 'wolves',
+    'wolverhampton': 'wolves',
+    'wolves': 'wolves',
+    'luton town': 'luton',
+    'luton': 'luton'
+  };
+  return aliases[n] || n;
+}
+
+// Convert football-data season year (e.g. 2026) to TheSportsDB season string
+function seasonString(year) {
+  const y = parseInt(year, 10);
+  return `${y}-${y + 1}`;
+}
+
+// ---- Player name normalization (for scorer matching) ----
+function normalizePlayer(name) {
+  if (!name) return '';
+  let n = name.toLowerCase().trim();
+  n = n.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  n = n.replace(/[^a-z ]/g, '');
+  n = n.replace(/\s+/g, ' ').trim();
+  return n;
+}
+
+// Return a set of comparable tokens for a player name: full name + last word
+function playerMatchKeys(name) {
+  const norm = normalizePlayer(name);
+  if (!norm) return [];
+  const parts = norm.split(' ');
+  const keys = new Set();
+  keys.add(norm);
+  keys.add(parts[parts.length - 1]); // surname
+  return [...keys];
+}
+
+// Two player names match if their normalized full names are equal OR share a surname
+function playersMatch(a, b) {
+  const ka = playerMatchKeys(a);
+  const kb = playerMatchKeys(b);
+  if (!ka.length || !kb.length) return false;
+  if (normalizePlayer(a) === normalizePlayer(b)) return true;
+  // surname match
+  return ka[ka.length - 1] === kb[kb.length - 1];
+}
+
+// ---- Fetch season events (list of fixtures with TheSportsDB event IDs) ----
+async function fetchSeasonEvents(seasonYear) {
+  const season = seasonString(seasonYear);
+  const now = Date.now();
+  if (seasonEventsCache.season === season && (now - seasonEventsCache.fetchedAt) < EVENTS_TTL_MS && seasonEventsCache.events.length) {
+    return seasonEventsCache.events;
+  }
+  try {
+    const url = `${BASE}/eventsseason.php?id=${PL_LEAGUE_ID}&s=${season}`;
+    const res = await axios.get(url, { timeout: 20000 });
+    const events = (res.data && res.data.events) || [];
+    seasonEventsCache = { season, fetchedAt: now, events };
+    console.log(`[GoalEvents] Cached ${events.length} events for ${season}`);
+    return events;
+  } catch (e) {
+    console.error('[GoalEvents] fetchSeasonEvents error:', e.message);
+    return seasonEventsCache.events || [];
+  }
+}
+
+// Find the TheSportsDB event that matches a football-data.org match
+function findEvent(events, homeTeam, awayTeam) {
+  const h = normalizeTeam(homeTeam);
+  const a = normalizeTeam(awayTeam);
+  return events.find(e => normalizeTeam(e.strHomeTeam) === h && normalizeTeam(e.strAwayTeam) === a) || null;
+}
+
+// ---- Get first goal (team + scorer) for a specific match ----
+// homeTeam/awayTeam are football-data.org names; matchKey is a stable id used for caching.
+async function getFirstGoal(seasonYear, matchKey, homeTeam, awayTeam) {
+  // Return permanently cached resolved result
+  if (firstGoalCache[matchKey] && firstGoalCache[matchKey].resolved) {
+    return firstGoalCache[matchKey];
+  }
+
+  try {
+    const events = await fetchSeasonEvents(seasonYear);
+    const event = findEvent(events, homeTeam, awayTeam);
+    if (!event) {
+      return { firstTeam: null, firstScorer: null, resolved: false };
+    }
+
+    const url = `${BASE}/lookuptimeline.php?id=${event.idEvent}`;
+    const res = await axios.get(url, { timeout: 20000 });
+    const timeline = (res.data && res.data.timeline) || [];
+    const goals = timeline
+      .filter(t => t.strTimeline === 'Goal')
+      .sort((x, y) => (parseInt(x.intTime || '999', 10)) - (parseInt(y.intTime || '999', 10)));
+
+    let result;
+    if (!timeline.length) {
+      // Timeline not yet populated - unresolved
+      result = { firstTeam: null, firstScorer: null, resolved: false };
+    } else if (!goals.length) {
+      // Match had a populated timeline but no goals => 0-0
+      result = { firstTeam: 'none', firstScorer: null, resolved: true };
+    } else {
+      const first = goals[0];
+      const isHome = first.strHome === 'Yes';
+      result = {
+        firstTeam: isHome ? 'home' : 'away',
+        firstScorer: first.strPlayer || null,
+        resolved: true
+      };
+    }
+
+    firstGoalCache[matchKey] = result;
+    if (result.resolved) saveCache();
+    return result;
+  } catch (e) {
+    console.error(`[GoalEvents] getFirstGoal error for ${homeTeam} vs ${awayTeam}:`, e.message);
+    return { firstTeam: null, firstScorer: null, resolved: false };
+  }
+}
+
+// ---- Scoring helpers ----
+// Award points for the first-team-to-score prediction (1pt)
+function scoreFirstTeam(predicted, actualFirstTeam) {
+  if (!predicted || !actualFirstTeam) return 0;
+  return predicted === actualFirstTeam ? 1 : 0;
+}
+
+// Award points for the first-scorer prediction (2pts)
+function scoreFirstScorer(predictedName, actualScorerName) {
+  if (!predictedName || !actualScorerName) return 0;
+  return playersMatch(predictedName, actualScorerName) ? 2 : 0;
+}
+
+module.exports = {
+  normalizeTeam,
+  normalizePlayer,
+  playersMatch,
+  fetchSeasonEvents,
+  getFirstGoal,
+  scoreFirstTeam,
+  scoreFirstScorer
+};

@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS predictions (
   home_score INTEGER,
   away_score INTEGER,
   is_doubler BOOLEAN DEFAULT FALSE,
+  first_team_to_score TEXT,
+  first_scorer TEXT,
   gameweek INTEGER,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -159,3 +161,10 @@ ALTER TABLE h2h_challenges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================
+-- MIGRATION (Aug 2026): First-team-to-score & first-scorer predictions
+-- Run this block once in the Supabase SQL Editor on existing databases.
+-- ============================================================
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS first_team_to_score TEXT;
+ALTER TABLE predictions ADD COLUMN IF NOT EXISTS first_scorer TEXT;

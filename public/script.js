@@ -609,6 +609,8 @@ async function handlePredictionSubmit(e) {
     const homeScore = parseInt(document.getElementById('homeScore').value);
     const awayScore = parseInt(document.getElementById('awayScore').value);
     const isDoubler = document.getElementById('doublerCheckbox').checked;
+    const firstTeamToScore = document.getElementById('firstTeamToScore').value || null;
+    const firstScorer = document.getElementById('firstScorer').value.trim() || null;
     
     try {
         const token = localStorage.getItem('token');
@@ -623,7 +625,9 @@ async function handlePredictionSubmit(e) {
                 homeScore,
                 awayScore,
                 isDoubler,
-                gameweek: currentGameweek
+                gameweek: currentGameweek,
+                firstTeamToScore,
+                firstScorer
             })
         });
         
@@ -974,6 +978,8 @@ function openPredictionModal(matchId, homeTeam, awayTeam, matchDate, gameweek) {
     // Store match info for submission
     window.currentMatchId = matchId;
     window.currentGameweek = gameweek;
+    window.currentHomeTeam = homeTeam;
+    window.currentAwayTeam = awayTeam;
     
     // Set team names in modal
     document.getElementById('modalHomeTeam').textContent = homeTeam;
@@ -982,6 +988,12 @@ function openPredictionModal(matchId, homeTeam, awayTeam, matchDate, gameweek) {
     const awayLabel = document.getElementById('awayTeamLabel');
     if (homeLabel) homeLabel.textContent = homeTeam;
     if (awayLabel) awayLabel.textContent = awayTeam;
+    
+    // Populate "first team to score" dropdown with the actual team names
+    const fttsHome = document.getElementById('fttsHomeOption');
+    const fttsAway = document.getElementById('fttsAwayOption');
+    if (fttsHome) fttsHome.textContent = homeTeam;
+    if (fttsAway) fttsAway.textContent = awayTeam;
     document.getElementById('modalMatchDate').textContent = new Date(matchDate).toLocaleDateString('en-US', {
         weekday: 'long', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
@@ -1003,6 +1015,8 @@ function openPredictionModal(matchId, homeTeam, awayTeam, matchDate, gameweek) {
     document.getElementById('homeScore').value = '';
     document.getElementById('awayScore').value = '';
     document.getElementById('doublerCheckbox').checked = false;
+    document.getElementById('firstTeamToScore').value = '';
+    document.getElementById('firstScorer').value = '';
     
     // Update doubler hint
     const doublerHint = document.getElementById('doublerHint');
@@ -1022,6 +1036,8 @@ function openPredictionModal(matchId, homeTeam, awayTeam, matchDate, gameweek) {
         document.getElementById('homeScore').value = existing.homeScore;
         document.getElementById('awayScore').value = existing.awayScore;
         document.getElementById('doublerCheckbox').checked = !!existing.isDoubler;
+        if (existing.firstTeamToScore) document.getElementById('firstTeamToScore').value = existing.firstTeamToScore;
+        if (existing.firstScorer) document.getElementById('firstScorer').value = existing.firstScorer;
     }
     
     // Show modal
