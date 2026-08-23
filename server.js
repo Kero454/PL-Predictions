@@ -1432,25 +1432,118 @@ app.get('/api/users/search', authenticateToken, async (req, res) => {
   }
 });
 
-// Get H2H matches for a gameweek (all matchups)
+// Helper: calculate live H2H scores for a matchup (works even during in-progress GW)
+async function calculateLiveH2HScores(h2hMatch) {
+  const allMatches = await fetchPremierLeagueMatches(h2hMatch.gameweek);
+  const finishedMatches = allMatches.filter(m => m.status === 'finished' && m.gameweek === h2hMatch.gameweek);
+  if (finishedMatches.length === 0) return { p1Score: 0, p2Score: 0, matchesScored: 0, totalMatches: allMatches.filter(m => m.gameweek === h2hMatch.gameweek).length };
+
+  const p1Preds = await db.getUserPredictions(h2hMatch.player1_id);
+  const p2Preds = await db.getUserPredictions(h2hMatch.player2_id);
+  const p1GWPreds = p1Preds.filter(p => p.gameweek === h2hMatch.gameweek);
+  const p2GWPreds = p2Preds.filter(p => p.gameweek === h2hMatch.gameweek);
+
+  const firstGoalByMatch = await getFirstGoalMap(finishedMatches);
+
+  let p1Score = 0, p2Score = 0;
+  for (const match of finishedMatches) {
+    const p1Pred = p1GWPreds.find(p => p.matchId == match.id);
+    const p2Pred = p2GWPreds.find(p => p.matchId == match.id);
+    const fg = firstGoalByMatch[match.id];
+    if (p1Pred) {
+      let pts = calculatePoints({ homeScore: p1Pred.homeScore, awayScore: p1Pred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
+      if (fg && fg.resolved) { pts += goalEvents.scoreFirstTeam(p1Pred.firstTeamToScore, fg.firstTeam); pts += goalEvents.scoreFirstScorer(p1Pred.firstScorer, fg.firstScorer); }
+      p1Score += pts;
+    }
+    if (p2Pred) {
+      let pts = calculatePoints({ homeScore: p2Pred.homeScore, awayScore: p2Pred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
+      if (fg && fg.resolved) { pts += goalEvents.scoreFirstTeam(p2Pred.firstTeamToScore, fg.firstTeam); pts += goalEvents.scoreFirstScorer(p2Pred.firstScorer, fg.firstScorer); }
+      p2Score += pts;
+    }
+  }
+  const gwMatches = allMatches.filter(m => m.gameweek === h2hMatch.gameweek);
+  return { p1Score, p2Score, matchesScored: finishedMatches.length, totalMatches: gwMatches.length };
+}
+
+// Get H2H matches for a gameweek (with live scores)
 app.get('/api/h2h/matches', authenticateToken, async (req, res) => {
   try {
     const gw = req.query.gameweek ? parseInt(req.query.gameweek) : await getCurrentGameweek();
     const matches = await db.getH2HMatchesForGW(gw);
-    res.json({ gameweek: gw, matches });
+
+    // For scheduled matches, calculate live scores
+    const enriched = await Promise.all(matches.map(async (m) => {
+      if (m.status === 'completed') return m; // Already has final scores
+      const live = await calculateLiveH2HScores(m);
+      return { ...m, live_p1_score: live.p1Score, live_p2_score: live.p2Score, matches_scored: live.matchesScored, total_matches: live.totalMatches };
+    }));
+
+    res.json({ gameweek: gw, matches: enriched });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch H2H matches' });
   }
 });
 
-// Get current user's H2H match for a gameweek
-app.get('/api/h2h/my-match', authenticateToken, async (req, res) => {
+// Get detailed H2H match breakdown (per-football-match predictions for both players)
+app.get('/api/h2h/match-detail', authenticateToken, async (req, res) => {
   try {
-    const gw = req.query.gameweek ? parseInt(req.query.gameweek) : await getCurrentGameweek();
-    const match = await db.getUserH2HMatchForGW(req.userId, gw);
-    res.json({ gameweek: gw, match });
+    const gw = parseInt(req.query.gameweek);
+    const p1Id = parseInt(req.query.p1);
+    const p2Id = parseInt(req.query.p2);
+    if (!gw || !p1Id || !p2Id) return res.status(400).json({ error: 'gameweek, p1, p2 required' });
+
+    const allMatches = await fetchPremierLeagueMatches(gw);
+    const gwMatches = allMatches.filter(m => m.gameweek === gw);
+    const finishedMatches = gwMatches.filter(m => m.status === 'finished');
+
+    const p1Preds = await db.getUserPredictions(p1Id);
+    const p2Preds = await db.getUserPredictions(p2Id);
+    const p1GWPreds = p1Preds.filter(p => p.gameweek === gw);
+    const p2GWPreds = p2Preds.filter(p => p.gameweek === gw);
+
+    const firstGoalByMatch = await getFirstGoalMap(finishedMatches);
+
+    const p1User = await db.getUserById(p1Id);
+    const p2User = await db.getUserById(p2Id);
+
+    const breakdown = gwMatches.map(match => {
+      const isFinished = match.status === 'finished';
+      const p1Pred = p1GWPreds.find(p => p.matchId == match.id);
+      const p2Pred = p2GWPreds.find(p => p.matchId == match.id);
+      const fg = firstGoalByMatch[match.id];
+
+      let p1Pts = 0, p2Pts = 0;
+      if (isFinished && p1Pred) {
+        p1Pts = calculatePoints({ homeScore: p1Pred.homeScore, awayScore: p1Pred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
+        if (fg && fg.resolved) { p1Pts += goalEvents.scoreFirstTeam(p1Pred.firstTeamToScore, fg.firstTeam); p1Pts += goalEvents.scoreFirstScorer(p1Pred.firstScorer, fg.firstScorer); }
+      }
+      if (isFinished && p2Pred) {
+        p2Pts = calculatePoints({ homeScore: p2Pred.homeScore, awayScore: p2Pred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
+        if (fg && fg.resolved) { p2Pts += goalEvents.scoreFirstTeam(p2Pred.firstTeamToScore, fg.firstTeam); p2Pts += goalEvents.scoreFirstScorer(p2Pred.firstScorer, fg.firstScorer); }
+      }
+
+      return {
+        matchId: match.id,
+        homeTeam: match.homeTeam,
+        awayTeam: match.awayTeam,
+        homeScore: match.homeScore,
+        awayScore: match.awayScore,
+        status: match.status,
+        p1Pred: p1Pred ? { home: p1Pred.homeScore, away: p1Pred.awayScore, firstTeam: p1Pred.firstTeamToScore, firstScorer: p1Pred.firstScorer } : null,
+        p2Pred: p2Pred ? { home: p2Pred.homeScore, away: p2Pred.awayScore, firstTeam: p2Pred.firstTeamToScore, firstScorer: p2Pred.firstScorer } : null,
+        p1Pts,
+        p2Pts
+      };
+    });
+
+    res.json({
+      gameweek: gw,
+      player1: { id: p1Id, username: p1User.username },
+      player2: { id: p2Id, username: p2User.username },
+      breakdown
+    });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch your H2H match' });
+    res.status(500).json({ error: 'Failed to fetch match detail' });
   }
 });
 

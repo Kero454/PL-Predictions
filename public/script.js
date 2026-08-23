@@ -1982,6 +1982,13 @@ function selectH2HGW(gw) {
     loadH2HMatches();
 }
 
+function getH2HScores(m) {
+    // Returns display scores: use final scores if completed, live scores if in-progress
+    if (m.status === 'completed') return { p1: m.player1_score, p2: m.player2_score, live: false };
+    if (m.live_p1_score !== undefined) return { p1: m.live_p1_score, p2: m.live_p2_score, live: true, scored: m.matches_scored, total: m.total_matches };
+    return { p1: null, p2: null, live: false };
+}
+
 function renderH2HMatches(matches, gw) {
     const listContainer = document.getElementById('h2hList');
     const myMatchContainer = document.getElementById('h2hMyMatch');
@@ -2003,25 +2010,27 @@ function renderH2HMatches(matches, gw) {
         if (myMatch) {
             const isP1 = myMatch.player1_id === currentUser.id;
             const oppName = isP1 ? myMatch.player2_name : myMatch.player1_name;
-            const myScore = isP1 ? myMatch.player1_score : myMatch.player2_score;
-            const oppScore = isP1 ? myMatch.player2_score : myMatch.player1_score;
+            const scores = getH2HScores(myMatch);
+            const myScore = isP1 ? scores.p1 : scores.p2;
+            const oppScore = isP1 ? scores.p2 : scores.p1;
             const myMonkey = isP1 ? myMatch.player1_used_monkey : myMatch.player2_used_monkey;
             const oppMonkey = isP1 ? myMatch.player2_used_monkey : myMatch.player1_used_monkey;
-            const iWon = myMatch.winner_id === currentUser.id;
-            const iLost = myMatch.winner_id && myMatch.winner_id !== currentUser.id;
-            const isDraw = myMatch.status === 'completed' && !myMatch.winner_id;
+            const iWon = myMatch.status === 'completed' && myMatch.winner_id === currentUser.id;
+            const iLost = myMatch.status === 'completed' && myMatch.winner_id && myMatch.winner_id !== currentUser.id;
 
             let resultHtml = '';
             if (myMatch.status === 'completed') {
                 if (iWon) resultHtml = '<span class="h2h-result-badge win">WIN</span>';
                 else if (iLost) resultHtml = '<span class="h2h-result-badge loss">LOSS</span>';
                 else resultHtml = '<span class="h2h-result-badge draw">DRAW</span>';
+            } else if (scores.scored > 0) {
+                resultHtml = `<span class="h2h-result-badge scheduled">LIVE ${scores.scored}/${scores.total}</span>`;
             } else {
                 resultHtml = '<span class="h2h-result-badge scheduled">UPCOMING</span>';
             }
 
             myMatchContainer.innerHTML = `
-                <div class="h2h-my-match-card">
+                <div class="h2h-my-match-card" onclick="openH2HDetail(${myMatch.gameweek}, ${myMatch.player1_id}, ${myMatch.player2_id})" style="cursor:pointer;">
                     <div class="h2h-my-match-header">
                         <span>Your GW${gw} Match</span>
                         ${resultHtml}
@@ -2029,14 +2038,15 @@ function renderH2HMatches(matches, gw) {
                     <div class="h2h-my-match-body">
                         <div class="h2h-player-side ${iWon ? 'winner' : ''}">
                             <span class="h2h-player-name">${currentUser.username}</span>
-                            ${myMatch.status === 'completed' ? `<span class="h2h-score">${myScore} pts${myMonkey ? ' <i class="fas fa-dice" title="Monkey predictions used"></i>' : ''}</span>` : ''}
+                            ${myScore !== null ? `<span class="h2h-score">${myScore} pts${myMonkey ? ' <i class="fas fa-dice" title="Monkey predictions"></i>' : ''}</span>` : ''}
                         </div>
                         <span class="h2h-vs">VS</span>
                         <div class="h2h-player-side ${iLost ? 'winner' : ''}">
                             <span class="h2h-player-name">${oppName}</span>
-                            ${myMatch.status === 'completed' ? `<span class="h2h-score">${oppScore} pts${oppMonkey ? ' <i class="fas fa-dice" title="Monkey predictions used"></i>' : ''}</span>` : ''}
+                            ${oppScore !== null ? `<span class="h2h-score">${oppScore} pts${oppMonkey ? ' <i class="fas fa-dice" title="Monkey predictions"></i>' : ''}</span>` : ''}
                         </div>
                     </div>
+                    <div style="text-align:center;font-size:0.65rem;color:rgba(255,255,255,0.4);margin-top:0.5rem;"><i class="fas fa-hand-pointer"></i> Tap for details</div>
                 </div>`;
         } else {
             myMatchContainer.innerHTML = `
@@ -2053,23 +2063,92 @@ function renderH2HMatches(matches, gw) {
     listContainer.innerHTML = `<h4 style="margin:0.75rem 0 0.5rem;color:rgba(255,255,255,0.7);font-size:0.8rem;">All GW${gw} Matchups</h4>` +
         matches.map(m => {
             const isCompleted = m.status === 'completed';
-            const p1Win = m.winner_id === m.player1_id;
-            const p2Win = m.winner_id === m.player2_id;
+            const scores = getH2HScores(m);
+            const p1Win = isCompleted && m.winner_id === m.player1_id;
+            const p2Win = isCompleted && m.winner_id === m.player2_id;
+            const hasScores = scores.p1 !== null;
             return `
-                <div class="h2h-card ${isCompleted ? 'completed' : 'scheduled'}">
+                <div class="h2h-card ${isCompleted ? 'completed' : 'scheduled'}" onclick="openH2HDetail(${m.gameweek}, ${m.player1_id}, ${m.player2_id})" style="cursor:pointer;">
                     <div class="h2h-players">
                         <div class="h2h-player-side ${p1Win ? 'winner' : ''}">
-                            <span class="h2h-player-name">${m.player1_name}${m.player1_used_monkey ? ' <i class="fas fa-dice" style="font-size:0.65rem;color:#ff9800;" title="Random predictions"></i>' : ''}</span>
-                            ${isCompleted ? `<span class="h2h-score">${m.player1_score}</span>` : ''}
+                            <span class="h2h-player-name">${m.player1_name}${m.player1_used_monkey ? ' <i class="fas fa-dice" style="font-size:0.65rem;color:#ff9800;"></i>' : ''}</span>
+                            ${hasScores ? `<span class="h2h-score">${scores.p1}</span>` : ''}
                         </div>
-                        <span class="h2h-vs">${isCompleted ? '-' : 'vs'}</span>
+                        <span class="h2h-vs">${hasScores ? '-' : 'vs'}</span>
                         <div class="h2h-player-side ${p2Win ? 'winner' : ''}">
-                            <span class="h2h-player-name">${m.player2_name}${m.player2_used_monkey ? ' <i class="fas fa-dice" style="font-size:0.65rem;color:#ff9800;" title="Random predictions"></i>' : ''}</span>
-                            ${isCompleted ? `<span class="h2h-score">${m.player2_score}</span>` : ''}
+                            <span class="h2h-player-name">${m.player2_name}${m.player2_used_monkey ? ' <i class="fas fa-dice" style="font-size:0.65rem;color:#ff9800;"></i>' : ''}</span>
+                            ${hasScores ? `<span class="h2h-score">${scores.p2}</span>` : ''}
                         </div>
                     </div>
+                    ${scores.live ? `<div style="text-align:center;font-size:0.6rem;color:rgba(255,255,255,0.4);margin-top:0.25rem;">${scores.scored}/${scores.total} matches played</div>` : ''}
                 </div>`;
         }).join('');
+}
+
+// Open H2H match detail modal
+async function openH2HDetail(gw, p1Id, p2Id) {
+    try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`/api/h2h/match-detail?gameweek=${gw}&p1=${p1Id}&p2=${p2Id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        showH2HDetailModal(data);
+    } catch (e) {
+        console.error('H2H detail error:', e);
+    }
+}
+
+function showH2HDetailModal(data) {
+    let existing = document.getElementById('h2hDetailModal');
+    if (existing) existing.remove();
+
+    const totalP1 = data.breakdown.reduce((s, m) => s + m.p1Pts, 0);
+    const totalP2 = data.breakdown.reduce((s, m) => s + m.p2Pts, 0);
+
+    const modal = document.createElement('div');
+    modal.id = 'h2hDetailModal';
+    modal.className = 'modal';
+    modal.style.display = 'block';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <h4><i class="fas fa-people-arrows"></i> GW${data.gameweek} — ${data.player1.username} vs ${data.player2.username}</h4>
+                <span class="close" onclick="document.getElementById('h2hDetailModal').remove()">&times;</span>
+            </div>
+            <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
+                <div class="h2h-detail-totals">
+                    <div class="h2h-detail-player ${totalP1 > totalP2 ? 'leading' : ''}">${data.player1.username}<br><strong>${totalP1} pts</strong></div>
+                    <div class="h2h-detail-vs">vs</div>
+                    <div class="h2h-detail-player ${totalP2 > totalP1 ? 'leading' : ''}">${data.player2.username}<br><strong>${totalP2} pts</strong></div>
+                </div>
+                <div class="h2h-detail-breakdown">
+                    ${data.breakdown.map(m => {
+                        const finished = m.status === 'finished';
+                        return `
+                        <div class="h2h-detail-match">
+                            <div class="h2h-detail-match-header">
+                                <span>${m.homeTeam} vs ${m.awayTeam}</span>
+                                ${finished ? `<span class="h2h-detail-result">${m.homeScore}-${m.awayScore}</span>` : `<span style="color:#999;font-size:0.7rem;">${m.status}</span>`}
+                            </div>
+                            <div class="h2h-detail-preds">
+                                <div class="h2h-detail-pred ${finished && m.p1Pts > m.p2Pts ? 'won' : ''}">
+                                    ${m.p1Pred ? `${m.p1Pred.home}-${m.p1Pred.away}` : '<span style="color:#999;">—</span>'}
+                                    ${finished ? `<span class="h2h-detail-pts">${m.p1Pts}pt${m.p1Pts !== 1 ? 's' : ''}</span>` : ''}
+                                </div>
+                                <div class="h2h-detail-pred ${finished && m.p2Pts > m.p1Pts ? 'won' : ''}">
+                                    ${m.p2Pred ? `${m.p2Pred.home}-${m.p2Pred.away}` : '<span style="color:#999;">—</span>'}
+                                    ${finished ? `<span class="h2h-detail-pts">${m.p2Pts}pt${m.p2Pts !== 1 ? 's' : ''}</span>` : ''}
+                                </div>
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 }
 
 // H2H tab switching
