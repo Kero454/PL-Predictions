@@ -402,13 +402,18 @@ async function loadRevealForCurrentGW() {
                     </div>
                     <div class="reveal-predictions">
                         ${matchPreds.length === 0 ? '<div class="reveal-none">No predictions</div>' :
-                        matchPreds.map(p => `
+                        matchPreds.map(p => {
+                            const ftts = p.firstTeamToScore === 'home' ? match.homeTeam.split(' ')[0] : p.firstTeamToScore === 'away' ? match.awayTeam.split(' ')[0] : '';
+                            const scorer = p.firstScorer === 'no_goal' ? '0-0' : (p.firstScorer ? p.firstScorer.split(' ').pop() : '');
+                            return `
                             <div class="reveal-pred-row">
                                 <span class="reveal-username">${p.username}</span>
                                 <span class="reveal-pred-score">${p.homeScore} - ${p.awayScore}</span>
                                 ${p.isDoubler ? '<span class="reveal-doubler">2x</span>' : ''}
-                            </div>
-                        `).join('')}
+                                ${ftts ? `<span class="reveal-bonus" title="First team to score"><i class="fas fa-futbol"></i> ${ftts}</span>` : ''}
+                                ${scorer ? `<span class="reveal-bonus" title="First scorer"><i class="fas fa-user"></i> ${scorer}</span>` : ''}
+                            </div>`;
+                        }).join('')}
                     </div>
                 </div>
             `;
@@ -2182,13 +2187,18 @@ async function loadPredictionReveal() {
                     </div>
                     <div class="reveal-predictions">
                         ${matchPreds.length === 0 ? '<div class="reveal-none">No predictions</div>' :
-                        matchPreds.map(p => `
+                        matchPreds.map(p => {
+                            const ftts = p.firstTeamToScore === 'home' ? match.homeTeam.split(' ')[0] : p.firstTeamToScore === 'away' ? match.awayTeam.split(' ')[0] : '';
+                            const scorer = p.firstScorer === 'no_goal' ? '0-0' : (p.firstScorer ? p.firstScorer.split(' ').pop() : '');
+                            return `
                             <div class="reveal-pred-row">
                                 <span class="reveal-username">${p.username}</span>
                                 <span class="reveal-pred-score">${p.homeScore} - ${p.awayScore}</span>
                                 ${p.isDoubler ? '<span class="reveal-doubler">2x</span>' : ''}
-                            </div>
-                        `).join('')}
+                                ${ftts ? `<span class="reveal-bonus" title="First team to score"><i class="fas fa-futbol"></i> ${ftts}</span>` : ''}
+                                ${scorer ? `<span class="reveal-bonus" title="First scorer"><i class="fas fa-user"></i> ${scorer}</span>` : ''}
+                            </div>`;
+                        }).join('')}
                     </div>
                 </div>
             `;

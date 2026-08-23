@@ -1300,10 +1300,11 @@ function generateRoundRobinSchedule(userIds, totalGameweeks = 38) {
     rotating.unshift(rotating.pop());
   }
 
-  // Distribute rounds across gameweeks (cycle if more GWs than rounds)
+  // Distribute rounds across gameweeks starting from GW5 (cycle if more GWs than rounds)
+  const H2H_START_GW = 5;
   const schedule = [];
-  for (let gw = 1; gw <= totalGameweeks; gw++) {
-    const roundIdx = (gw - 1) % rounds.length;
+  for (let gw = H2H_START_GW; gw <= totalGameweeks; gw++) {
+    const roundIdx = (gw - H2H_START_GW) % rounds.length;
     const pairs = rounds[roundIdx];
     for (const [p1, p2] of pairs) {
       schedule.push({ season: parseInt(PL_SEASON_YEAR), gameweek: gw, player1_id: p1, player2_id: p2 });
@@ -1384,11 +1385,11 @@ async function scoreH2HMatch(h2hMatch) {
   return { p1Score, p2Score, winnerId, p1UsedMonkey, p2UsedMonkey };
 }
 
-// Process H2H: score all completed GWs that haven't been scored yet
+// Process H2H: score all completed GWs that haven't been scored yet (starts from GW5)
 async function processH2HMatches() {
   try {
     const currentGW = await getCurrentGameweek();
-    for (let gw = 1; gw < currentGW; gw++) {
+    for (let gw = 5; gw < currentGW; gw++) {
       const scheduled = await db.getScheduledH2HMatchesForGW(gw);
       for (const match of scheduled) {
         await scoreH2HMatch(match);

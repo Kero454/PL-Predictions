@@ -655,6 +655,8 @@ const getGameweekPredictions = async (gameweek) => {
     homeScore: r.home_score,
     awayScore: r.away_score,
     isDoubler: r.is_doubler,
+    firstTeamToScore: r.first_team_to_score,
+    firstScorer: r.first_scorer,
     gameweek: r.gameweek
   }));
 };
