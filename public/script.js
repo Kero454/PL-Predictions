@@ -1949,7 +1949,7 @@ let h2hSelectedGW = null;
 async function loadH2HMatches() {
     try {
         const token = localStorage.getItem('token');
-        const gw = h2hSelectedGW || currentGameweek || 1;
+        const gw = h2hSelectedGW || Math.max(currentGameweek || 5, 5);
         const response = await fetch(`/api/h2h/matches?gameweek=${gw}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -1964,9 +1964,9 @@ async function loadH2HMatches() {
 function renderH2HGwPills() {
     const container = document.getElementById('h2hGwPills');
     if (!container) return;
-    const gw = h2hSelectedGW || currentGameweek || 1;
+    const gw = h2hSelectedGW || Math.max(currentGameweek || 5, 5);
     let html = '';
-    const start = Math.max(1, gw - 3);
+    const start = Math.max(5, gw - 3);
     const end = Math.min(38, gw + 3);
     for (let i = start; i <= end; i++) {
         const isActive = i === gw;
