@@ -339,8 +339,8 @@ function showSection(sectionName) {
             if (typeof loadLeagues === 'function') loadLeagues();
             break;
         case 'h2h':
-            loadH2HChallenges();
-            loadH2HInfo();
+            renderH2HGwPills();
+            loadH2HMatches();
             break;
         case 'profile':
             if (typeof loadProfile === 'function') loadProfile();
@@ -1884,8 +1884,8 @@ showSection = function(sectionName) {
             loadLeagues();
             break;
         case 'h2h':
-            loadH2HChallenges();
-            loadH2HInfo();
+            renderH2HGwPills();
+            loadH2HMatches();
             break;
         case 'seasonStats':
             loadSeasonStats();
@@ -1937,341 +1937,195 @@ showMainApp = function() {
     });
 }
 
-// ===== HEAD-TO-HEAD =====
+// ===== HEAD-TO-HEAD (Round-Robin) =====
 
-let selectedOpponentId = null;
+let h2hSelectedGW = null;
 
-async function openH2HChallengeModal() {
-    document.getElementById('h2hChallengeModal').style.display = 'block';
-    document.getElementById('h2hSearchInput').value = '';
-    document.getElementById('h2hSearchResults').innerHTML = '';
-    document.getElementById('sendChallengeBtn').disabled = true;
-    selectedOpponentId = null;
-
-    // Fetch H2H info to get allowed challenge GW
+async function loadH2HMatches() {
     try {
         const token = localStorage.getItem('token');
-        const infoRes = await fetch('/api/h2h/info', { headers: { 'Authorization': `Bearer ${token}` } });
-        if (infoRes.ok) {
-            const info = await infoRes.json();
-            const sel = document.getElementById('h2hGameweek');
-            sel.innerHTML = '';
-            const opt = document.createElement('option');
-            opt.value = info.challengeGameweek;
-            opt.textContent = `Gameweek ${info.challengeGameweek}`;
-            opt.selected = true;
-            sel.appendChild(opt);
-
-            if (info.proposalsSent >= info.maxProposals) {
-                showError(`You already sent ${info.maxProposals} challenge proposals for GW${info.challengeGameweek}`);
-                closeModal('h2hChallengeModal');
-                return;
-            }
-        }
-    } catch (e) {
-        // Fallback: show current GW
-        const sel = document.getElementById('h2hGameweek');
-        sel.innerHTML = `<option value="${currentGameweek}">Gameweek ${currentGameweek}</option>`;
-    }
-}
-
-let h2hSearchTimeout = null;
-function searchH2HOpponent() {
-    clearTimeout(h2hSearchTimeout);
-    const query = document.getElementById('h2hSearchInput').value.trim();
-    if (query.length < 2) {
-        document.getElementById('h2hSearchResults').innerHTML = '';
-        return;
-    }
-    h2hSearchTimeout = setTimeout(async () => {
-        try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            const users = await response.json();
-            const container = document.getElementById('h2hSearchResults');
-            if (!users.length) {
-                container.innerHTML = '<div class="h2h-no-results">No players found</div>';
-                return;
-            }
-            container.innerHTML = users.map(u => `
-                <div class="h2h-user-result ${selectedOpponentId === u.id ? 'selected' : ''}" onclick="selectH2HOpponent(${u.id}, '${u.username}')">
-                    <span class="h2h-user-name">${u.username}</span>
-                    <span class="h2h-user-score">${u.score} pts</span>
-                </div>
-            `).join('');
-        } catch (e) {
-            console.error('H2H search error:', e);
-        }
-    }, 300);
-}
-
-function selectH2HOpponent(id, name) {
-    selectedOpponentId = id;
-    document.getElementById('sendChallengeBtn').disabled = false;
-    // Highlight selected
-    document.querySelectorAll('.h2h-user-result').forEach(el => el.classList.remove('selected'));
-    event.currentTarget.classList.add('selected');
-}
-
-async function sendH2HChallenge() {
-    if (!selectedOpponentId) return;
-    const gameweek = parseInt(document.getElementById('h2hGameweek').value);
-    try {
-        const token = localStorage.getItem('token');
-        const response = await fetch('/api/h2h/challenge', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ opponentId: selectedOpponentId, gameweek })
-        });
-        const data = await response.json();
-        if (response.ok) {
-            closeModal('h2hChallengeModal');
-            showSuccess('Challenge sent!');
-            loadH2HChallenges();
-        } else {
-            showError(data.error);
-        }
-    } catch (e) {
-        showError('Failed to send challenge');
-    }
-}
-
-let h2hSelectedGW = null; // null = 'All'
-let h2hAllChallenges = [];
-
-async function loadH2HChallenges() {
-    try {
-        const token = localStorage.getItem('token');
-        const response = await fetch('/api/h2h', {
+        const gw = h2hSelectedGW || currentGameweek || 1;
+        const response = await fetch(`/api/h2h/matches?gameweek=${gw}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
-        h2hAllChallenges = await response.json();
-
-        // Build H2H GW pills
-        renderH2HGwPills();
-
-        // Render challenges for selected GW
-        renderH2HChallenges();
+        if (!response.ok) return;
+        const data = await response.json();
+        renderH2HMatches(data.matches || [], data.gameweek);
     } catch (e) {
-        console.error('Failed to load H2H challenges:', e);
+        console.error('Failed to load H2H matches:', e);
     }
 }
 
 function renderH2HGwPills() {
     const container = document.getElementById('h2hGwPills');
     if (!container) return;
-
-    // Collect GWs that have challenges
-    const gwSet = new Set(h2hAllChallenges.map(c => c.gameweek));
-    // Also include currentGameweek and surrounding GWs for future navigation
-    if (currentGameweek) {
-        for (let i = Math.max(1, currentGameweek - 2); i <= Math.min(38, currentGameweek + 2); i++) gwSet.add(i);
+    const gw = h2hSelectedGW || currentGameweek || 1;
+    let html = '';
+    const start = Math.max(1, gw - 3);
+    const end = Math.min(38, gw + 3);
+    for (let i = start; i <= end; i++) {
+        const isActive = i === gw;
+        const isCurrent = i === currentGameweek;
+        html += `<button class="gw-pill ${isActive ? 'active' : ''} ${isCurrent ? 'current' : ''}" onclick="selectH2HGW(${i})">GW${i}</button>`;
     }
-    const gwList = [...gwSet].sort((a, b) => a - b);
-
-    let html = `<button class="gw-pill ${h2hSelectedGW === null ? 'active' : ''}" onclick="selectH2HGW(null)">All</button>`;
-    gwList.forEach(gw => {
-        const hasChallenges = h2hAllChallenges.some(c => c.gameweek === gw);
-        const isCurrent = gw === currentGameweek;
-        html += `<button class="gw-pill ${h2hSelectedGW === gw ? 'active' : ''} ${isCurrent ? 'current' : ''}" onclick="selectH2HGW(${gw})">GW${gw}${hasChallenges ? '' : ''}</button>`;
-    });
     container.innerHTML = html;
 }
 
 function selectH2HGW(gw) {
     h2hSelectedGW = gw;
     renderH2HGwPills();
-    renderH2HChallenges();
+    loadH2HMatches();
 }
 
-function renderH2HChallenges() {
-    // Filter challenges by selected GW
-    let challenges = h2hAllChallenges.filter(c => {
-        if (c.status === 'expired' || c.status === 'declined') return false;
-        return true;
-    });
-    if (h2hSelectedGW !== null) {
-        challenges = challenges.filter(c => c.gameweek === h2hSelectedGW);
-    }
-
-    const pending = challenges.filter(c => c.status === 'pending' && c.opponent_id === currentUser.id);
-    const rest = challenges.filter(c => !(c.status === 'pending' && c.opponent_id === currentUser.id));
-
-    // Pending challenges (need action)
-    const pendingContainer = document.getElementById('h2hPending');
-    if (pending.length > 0) {
-        pendingContainer.innerHTML = `
-            <h4 style="color:#ffd700; margin-bottom:0.75rem;"><i class="fas fa-exclamation-circle"></i> Pending Challenges</h4>
-            ${pending.map(c => `
-                <div class="h2h-card pending">
-                    <div class="h2h-card-header">
-                        <span class="h2h-gw">GW${c.gameweek}</span>
-                        <span class="h2h-status status-pending">PENDING</span>
-                    </div>
-                    <div class="h2h-players">
-                        <span class="h2h-player">${c.challenger_name}</span>
-                        <span class="h2h-vs">VS</span>
-                        <span class="h2h-player">${c.opponent_name}</span>
-                    </div>
-                    <div class="h2h-actions">
-                        <button class="btn btn-primary btn-sm" onclick="acceptChallenge(${c.id})"><i class="fas fa-check"></i> Accept</button>
-                        <button class="btn btn-secondary btn-sm" onclick="declineChallenge(${c.id})"><i class="fas fa-times"></i> Decline</button>
-                    </div>
-                </div>
-            `).join('')}`;
-    } else {
-        pendingContainer.innerHTML = '';
-    }
-
-    // All other challenges
+function renderH2HMatches(matches, gw) {
     const listContainer = document.getElementById('h2hList');
-    if (!rest.length && !pending.length) {
-        const gwLabel = h2hSelectedGW !== null ? ` for GW${h2hSelectedGW}` : '';
-        listContainer.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-people-arrows"></i>
-                <p>No challenges${gwLabel}. Challenge a friend!</p>
+    const myMatchContainer = document.getElementById('h2hMyMatch');
+
+    if (!matches.length) {
+        if (myMatchContainer) myMatchContainer.innerHTML = `
+            <div class="empty-state" style="padding:1rem;">
+                <i class="fas fa-calendar-times"></i>
+                <p>No H2H matches scheduled for GW${gw}. Schedule will be generated when the season starts.</p>
             </div>`;
+        listContainer.innerHTML = '';
         return;
     }
 
-    listContainer.innerHTML = rest.map(c => {
-        const statusClass = c.status === 'accepted' ? 'status-active' : c.status === 'completed' ? 'status-completed' : c.status === 'declined' ? 'status-declined' : c.status === 'expired' ? 'status-expired' : 'status-pending';
-        const isMeChallenger = c.challenger_id === currentUser.id;
-        return `
-            <div class="h2h-card ${c.status}">
-                <div class="h2h-card-header">
-                    <span class="h2h-gw">GW${c.gameweek}</span>
-                    <span class="h2h-status ${statusClass}">${c.status.toUpperCase()}</span>
-                </div>
-                <div class="h2h-players">
-                    <div class="h2h-player-side ${c.winner_id === c.challenger_id ? 'winner' : ''}">
-                        <span class="h2h-player-name">${c.challenger_name}</span>
-                        ${c.status === 'completed' ? `<span class="h2h-score">${c.challenger_score} pts</span>` : ''}
-                    </div>
-                    <span class="h2h-vs">VS</span>
-                    <div class="h2h-player-side ${c.winner_id === c.opponent_id ? 'winner' : ''}">
-                        <span class="h2h-player-name">${c.opponent_name}</span>
-                        ${c.status === 'completed' ? `<span class="h2h-score">${c.opponent_score} pts</span>` : ''}
-                    </div>
-                </div>
-                ${c.status === 'completed' && c.winner_name ? `<div class="h2h-winner"><i class="fas fa-trophy" style="color:#ffd700;"></i> ${c.winner_name} wins!</div>` : ''}
-                ${c.status === 'completed' && !c.winner_id ? `<div class="h2h-winner"><i class="fas fa-handshake" style="color:#667eea;"></i> It's a draw!</div>` : ''}
-                ${c.status === 'pending' && isMeChallenger ? `<div class="h2h-waiting"><i class="fas fa-hourglass-half"></i> Waiting for response...</div>` : ''}
-            </div>
-        `;
-    }).join('');
-}
+    // Find my match
+    const myMatch = matches.find(m => m.player1_id === currentUser.id || m.player2_id === currentUser.id);
 
-async function acceptChallenge(id) {
-    try {
-        const token = localStorage.getItem('token');
-        const response = await fetch(`/api/h2h/${id}/accept`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (response.ok) {
-            showSuccess('Challenge accepted!');
-            loadH2HChallenges();
+    if (myMatchContainer) {
+        if (myMatch) {
+            const isP1 = myMatch.player1_id === currentUser.id;
+            const oppName = isP1 ? myMatch.player2_name : myMatch.player1_name;
+            const myScore = isP1 ? myMatch.player1_score : myMatch.player2_score;
+            const oppScore = isP1 ? myMatch.player2_score : myMatch.player1_score;
+            const myMonkey = isP1 ? myMatch.player1_used_monkey : myMatch.player2_used_monkey;
+            const oppMonkey = isP1 ? myMatch.player2_used_monkey : myMatch.player1_used_monkey;
+            const iWon = myMatch.winner_id === currentUser.id;
+            const iLost = myMatch.winner_id && myMatch.winner_id !== currentUser.id;
+            const isDraw = myMatch.status === 'completed' && !myMatch.winner_id;
+
+            let resultHtml = '';
+            if (myMatch.status === 'completed') {
+                if (iWon) resultHtml = '<span class="h2h-result-badge win">WIN</span>';
+                else if (iLost) resultHtml = '<span class="h2h-result-badge loss">LOSS</span>';
+                else resultHtml = '<span class="h2h-result-badge draw">DRAW</span>';
+            } else {
+                resultHtml = '<span class="h2h-result-badge scheduled">UPCOMING</span>';
+            }
+
+            myMatchContainer.innerHTML = `
+                <div class="h2h-my-match-card">
+                    <div class="h2h-my-match-header">
+                        <span>Your GW${gw} Match</span>
+                        ${resultHtml}
+                    </div>
+                    <div class="h2h-my-match-body">
+                        <div class="h2h-player-side ${iWon ? 'winner' : ''}">
+                            <span class="h2h-player-name">${currentUser.username}</span>
+                            ${myMatch.status === 'completed' ? `<span class="h2h-score">${myScore} pts${myMonkey ? ' <i class="fas fa-dice" title="Monkey predictions used"></i>' : ''}</span>` : ''}
+                        </div>
+                        <span class="h2h-vs">VS</span>
+                        <div class="h2h-player-side ${iLost ? 'winner' : ''}">
+                            <span class="h2h-player-name">${oppName}</span>
+                            ${myMatch.status === 'completed' ? `<span class="h2h-score">${oppScore} pts${oppMonkey ? ' <i class="fas fa-dice" title="Monkey predictions used"></i>' : ''}</span>` : ''}
+                        </div>
+                    </div>
+                </div>`;
         } else {
-            const data = await response.json();
-            showError(data.error);
+            myMatchContainer.innerHTML = `
+                <div class="h2h-my-match-card">
+                    <div class="h2h-my-match-header"><span>Your GW${gw} Match</span></div>
+                    <div class="h2h-my-match-body" style="justify-content:center;color:rgba(255,255,255,0.5);">
+                        <i class="fas fa-couch" style="margin-right:0.5rem;"></i> Bye week — no opponent this gameweek
+                    </div>
+                </div>`;
         }
-    } catch (e) { showError('Failed to accept'); }
-}
+    }
 
-async function declineChallenge(id) {
-    try {
-        const token = localStorage.getItem('token');
-        const response = await fetch(`/api/h2h/${id}/decline`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (response.ok) {
-            showSuccess('Challenge declined');
-            loadH2HChallenges();
-        }
-    } catch (e) { showError('Failed to decline'); }
+    // All matches for this GW
+    listContainer.innerHTML = `<h4 style="margin:0.75rem 0 0.5rem;color:rgba(255,255,255,0.7);font-size:0.8rem;">All GW${gw} Matchups</h4>` +
+        matches.map(m => {
+            const isCompleted = m.status === 'completed';
+            const p1Win = m.winner_id === m.player1_id;
+            const p2Win = m.winner_id === m.player2_id;
+            return `
+                <div class="h2h-card ${isCompleted ? 'completed' : 'scheduled'}">
+                    <div class="h2h-players">
+                        <div class="h2h-player-side ${p1Win ? 'winner' : ''}">
+                            <span class="h2h-player-name">${m.player1_name}${m.player1_used_monkey ? ' <i class="fas fa-dice" style="font-size:0.65rem;color:#ff9800;" title="Random predictions"></i>' : ''}</span>
+                            ${isCompleted ? `<span class="h2h-score">${m.player1_score}</span>` : ''}
+                        </div>
+                        <span class="h2h-vs">${isCompleted ? '-' : 'vs'}</span>
+                        <div class="h2h-player-side ${p2Win ? 'winner' : ''}">
+                            <span class="h2h-player-name">${m.player2_name}${m.player2_used_monkey ? ' <i class="fas fa-dice" style="font-size:0.65rem;color:#ff9800;" title="Random predictions"></i>' : ''}</span>
+                            ${isCompleted ? `<span class="h2h-score">${m.player2_score}</span>` : ''}
+                        </div>
+                    </div>
+                </div>`;
+        }).join('');
 }
 
 // H2H tab switching
 function showH2HTab(tab, evt) {
-    const tabs = document.querySelectorAll('.h2h-tabs .h2h-tab');
+    const tabs = document.querySelectorAll('#h2hSection .h2h-tabs .h2h-tab');
     tabs.forEach(t => t.classList.remove('active'));
-    document.getElementById('h2hChallengesTab').style.display = tab === 'challenges' ? 'block' : 'none';
+    document.getElementById('h2hMatchesTab').style.display = tab === 'matches' ? 'block' : 'none';
     document.getElementById('h2hLeaderboardTab').style.display = tab === 'leaderboard' ? 'block' : 'none';
-    const clicked = evt ? evt.currentTarget : (tab === 'challenges' ? tabs[0] : tabs[1]);
+    const clicked = evt ? evt.currentTarget : (tab === 'matches' ? tabs[0] : tabs[1]);
     if (clicked) clicked.classList.add('active');
-    if (tab === 'challenges') loadH2HChallenges();
+    if (tab === 'matches') { renderH2HGwPills(); loadH2HMatches(); }
     if (tab === 'leaderboard') loadH2HLeaderboard();
 }
 
-// Load H2H info bar (challenge GW + remaining slots)
-async function loadH2HInfo() {
-    try {
-        const token = localStorage.getItem('token');
-        const res = await fetch('/api/h2h/info', { headers: { 'Authorization': `Bearer ${token}` } });
-        if (!res.ok) return;
-        const info = await res.json();
-        const bar = document.getElementById('h2hInfoBar');
-        const proposalsLeft = info.maxProposals - info.proposalsSent;
-        const acceptsLeft = info.maxAccepts - info.challengesAccepted;
-        bar.innerHTML = `
-            <span><i class="fas fa-gamepad"></i> Challenge for: <strong>GW${info.challengeGameweek}</strong></span>
-            <span><i class="fas fa-paper-plane"></i> ${proposalsLeft}/${info.maxProposals} proposals</span>
-            <span><i class="fas fa-check-circle"></i> ${acceptsLeft}/${info.maxAccepts} accepts</span>
-        `;
-    } catch (e) { /* ignore */ }
-}
-
-// Load H2H leaderboard (with player total scores from main leaderboard)
+// Load H2H leaderboard (league table format)
 async function loadH2HLeaderboard() {
     try {
-        const [h2hRes, lbRes] = await Promise.all([
-            fetch('/api/h2h/leaderboard'),
-            fetch('/api/leaderboard')
-        ]);
-        if (!h2hRes.ok) throw new Error('Failed');
-        const leaderboard = await h2hRes.json();
-        const mainLb = lbRes.ok ? await lbRes.json() : [];
+        const res = await fetch('/api/h2h/leaderboard');
+        if (!res.ok) throw new Error('Failed');
+        const leaderboard = await res.json();
         const container = document.getElementById('h2hLeaderboardList');
-
-        // Build a score lookup from main leaderboard
-        const scoreLookup = {};
-        mainLb.forEach(p => { scoreLookup[p.id] = p.score; });
 
         if (!leaderboard.length) {
             container.innerHTML = `
                 <div class="empty-state">
                     <i class="fas fa-people-arrows"></i>
-                    <p>No completed H2H challenges yet</p>
+                    <p>No completed H2H matches yet. Results will appear after Gameweek 1.</p>
                 </div>`;
             return;
         }
 
-        container.innerHTML = leaderboard.map((p, i) => {
-            const rank = i + 1;
-            let rankClass = '';
-            if (rank === 1) rankClass = 'gold';
-            else if (rank === 2) rankClass = 'silver';
-            else if (rank === 3) rankClass = 'bronze';
-            const totalScore = scoreLookup[p.id] !== undefined ? scoreLookup[p.id] : '—';
-            return `
-                <div class="leaderboard-item ${rank <= 3 ? 'top-3' : ''}">
-                    <div class="player-info">
-                        <div class="player-rank ${rankClass}">${rank}</div>
-                        <div class="player-name-wrap">
-                            <div class="player-name">${p.username}</div>
-                            <div style="font-size:0.65rem;color:rgba(255,255,255,0.45);">${p.wins}W ${p.draws}D ${p.losses}L · ${totalScore} pts overall</div>
-                        </div>
-                    </div>
-                    <div class="player-score">
-                        <span>${p.glory} <i class="fas fa-fire" style="color:#ffd700;font-size:0.7rem;"></i></span>
-                    </div>
-                </div>`;
-        }).join('');
+        container.innerHTML = `
+            <div class="h2h-league-table">
+                <div class="h2h-table-header">
+                    <span class="h2h-col-rank">#</span>
+                    <span class="h2h-col-name">Player</span>
+                    <span class="h2h-col-p">P</span>
+                    <span class="h2h-col-w">W</span>
+                    <span class="h2h-col-d">D</span>
+                    <span class="h2h-col-l">L</span>
+                    <span class="h2h-col-gd">GD</span>
+                    <span class="h2h-col-pts">Pts</span>
+                </div>
+                ${leaderboard.map((p, i) => {
+                    const rank = i + 1;
+                    const gd = p.gf - p.ga;
+                    const gdStr = gd > 0 ? `+${gd}` : `${gd}`;
+                    const isMe = currentUser && p.id === currentUser.id;
+                    return `
+                        <div class="h2h-table-row ${isMe ? 'is-me' : ''} ${rank <= 3 ? 'top-3' : ''}">
+                            <span class="h2h-col-rank">${rank}</span>
+                            <span class="h2h-col-name">${p.username}</span>
+                            <span class="h2h-col-p">${p.played}</span>
+                            <span class="h2h-col-w">${p.wins}</span>
+                            <span class="h2h-col-d">${p.draws}</span>
+                            <span class="h2h-col-l">${p.losses}</span>
+                            <span class="h2h-col-gd">${gdStr}</span>
+                            <span class="h2h-col-pts"><strong>${p.points}</strong></span>
+                        </div>`;
+                }).join('')}
+            </div>`;
     } catch (e) {
         console.error('H2H leaderboard error:', e);
     }

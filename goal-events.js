@@ -124,25 +124,40 @@ function normalizePlayer(name) {
   return n;
 }
 
-// Return a set of comparable tokens for a player name: full name + last word
-function playerMatchKeys(name) {
-  const norm = normalizePlayer(name);
-  if (!norm) return [];
-  const parts = norm.split(' ');
-  const keys = new Set();
-  keys.add(norm);
-  keys.add(parts[parts.length - 1]); // surname
-  return [...keys];
-}
-
-// Two player names match if their normalized full names are equal OR share a surname
+// Robust player name matching: handles different formats between APIs
+// e.g. "Martinelli" vs "Gabriel Martinelli", "Sávio" vs "Savio Moreira"
 function playersMatch(a, b) {
-  const ka = playerMatchKeys(a);
-  const kb = playerMatchKeys(b);
-  if (!ka.length || !kb.length) return false;
-  if (normalizePlayer(a) === normalizePlayer(b)) return true;
-  // surname match
-  return ka[ka.length - 1] === kb[kb.length - 1];
+  if (!a || !b) return false;
+  const na = normalizePlayer(a);
+  const nb = normalizePlayer(b);
+  if (!na || !nb) return false;
+
+  // 1. Exact match
+  if (na === nb) return true;
+
+  const partsA = na.split(' ');
+  const partsB = nb.split(' ');
+
+  // 2. Surname match (last word)
+  if (partsA[partsA.length - 1] === partsB[partsB.length - 1]) return true;
+
+  // 3. Mononym/short name: if one is a single word, check if it appears anywhere in the other
+  if (partsA.length === 1 && partsB.includes(partsA[0])) return true;
+  if (partsB.length === 1 && partsA.includes(partsB[0])) return true;
+
+  // 4. Substring match: one full name contains the other
+  if (na.includes(nb) || nb.includes(na)) return true;
+
+  // 5. First name + last name match across different orderings
+  if (partsA.length >= 2 && partsB.length >= 2) {
+    // Check if first name of A matches first name of B
+    if (partsA[0] === partsB[0] && partsA[0].length >= 4) return true;
+    // Check token overlap: if 2+ words match between the names
+    const overlap = partsA.filter(w => w.length >= 3 && partsB.includes(w));
+    if (overlap.length >= 2) return true;
+  }
+
+  return false;
 }
 
 // ---- Fetch season events (list of fixtures with TheSportsDB event IDs) ----

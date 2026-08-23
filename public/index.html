@@ -298,30 +298,24 @@
             <div id="h2hSection" class="section">
                 <div class="section-header">
                     <h3><i class="fas fa-people-arrows"></i> Head-to-Head</h3>
-                    <div class="header-controls">
-                        <button class="btn btn-primary" onclick="openH2HChallengeModal()"><i class="fas fa-plus"></i> Challenge</button>
-                    </div>
-                </div>
-                <div id="h2hInfoBar" class="h2h-info-bar">
-                    <!-- Filled by JS: shows challenge GW, remaining slots -->
                 </div>
                 <!-- H2H Sub-tabs -->
                 <div class="h2h-tabs">
-                    <button class="h2h-tab active" onclick="showH2HTab('challenges', event)">My Challenges</button>
-                    <button class="h2h-tab" onclick="showH2HTab('leaderboard', event)">H2H Leaderboard</button>
+                    <button class="h2h-tab active" onclick="showH2HTab('matches', event)">Matchups</button>
+                    <button class="h2h-tab" onclick="showH2HTab('leaderboard', event)">League Table</button>
                 </div>
-                <div id="h2hChallengesTab">
+                <div id="h2hMatchesTab">
                     <!-- H2H Gameweek Navigation -->
                     <div id="h2hGwNav" class="gameweek-pills-container" style="margin-bottom:0.75rem;">
                         <div id="h2hGwPills" class="gameweek-pills"></div>
                     </div>
-                    <!-- Pending Challenges -->
-                    <div id="h2hPending" class="h2h-section-group"></div>
-                    <!-- Active / Completed Challenges -->
+                    <!-- My Match -->
+                    <div id="h2hMyMatch"></div>
+                    <!-- All GW Matchups -->
                     <div id="h2hList" class="h2h-list"></div>
                 </div>
                 <div id="h2hLeaderboardTab" style="display:none;">
-                    <div id="h2hLeaderboardList" class="leaderboard-list"></div>
+                    <div id="h2hLeaderboardList"></div>
                 </div>
             </div>
 
@@ -595,28 +589,6 @@
         </div>
     </div>
 
-    <!-- H2H Challenge Modal -->
-    <div id="h2hChallengeModal" class="modal">
-        <div class="modal-content modal-small">
-            <div class="modal-header">
-                <h4><i class="fas fa-people-arrows"></i> Challenge a Player</h4>
-                <span class="close" onclick="closeModal('h2hChallengeModal')">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label>Search Player</label>
-                    <input type="text" id="h2hSearchInput" placeholder="Type a username..." oninput="searchH2HOpponent()">
-                </div>
-                <div id="h2hSearchResults" class="h2h-search-results"></div>
-                <div class="form-group">
-                    <label>Gameweek</label>
-                    <select id="h2hGameweek" class="gameweek-selector">
-                    </select>
-                </div>
-                <button class="btn btn-primary" onclick="sendH2HChallenge()" id="sendChallengeBtn" disabled><i class="fas fa-paper-plane"></i> Send Challenge</button>
-            </div>
-        </div>
-    </div>
 
     <!-- Badge Notification -->
     <div id="badgeNotification" class="badge-notification" style="display: none;">

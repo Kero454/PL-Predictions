@@ -394,189 +394,135 @@ const searchUsers = async (query) => {
   return data || [];
 };
 
-// ===== HEAD-TO-HEAD OPERATIONS =====
+// ===== HEAD-TO-HEAD OPERATIONS (Round-Robin) =====
 
-const createH2HChallenge = async (challengerId, opponentId, gameweek) => {
+// Get all H2H matches for a season
+const getH2HSchedule = async (season = 2026) => {
   const { data, error } = await supabase
-    .from('h2h_challenges')
-    .insert({ challenger_id: challengerId, opponent_id: opponentId, gameweek, status: 'pending' })
-    .select('id')
-    .single();
-  if (error) {
-    if (error.code === '23505') throw new Error('Challenge already exists for this gameweek');
-    throw error;
-  }
-  return { id: data.id };
-};
-
-const acceptH2HChallenge = async (challengeId, userId) => {
-  const { data, error } = await supabase
-    .from('h2h_challenges')
-    .update({ status: 'accepted' })
-    .eq('id', challengeId)
-    .eq('opponent_id', userId)
-    .eq('status', 'pending')
-    .select();
-  if (error) throw error;
-  if (!data || data.length === 0) throw new Error('Challenge not found or already accepted');
-};
-
-const declineH2HChallenge = async (challengeId, userId) => {
-  const { error } = await supabase
-    .from('h2h_challenges')
-    .update({ status: 'declined' })
-    .eq('id', challengeId)
-    .eq('opponent_id', userId)
-    .eq('status', 'pending');
-  if (error) throw error;
-};
-
-const getUserH2HChallenges = async (userId) => {
-  const { data, error } = await supabase
-    .from('h2h_challenges')
+    .from('h2h_matches')
     .select(`
       *,
-      challenger:users!h2h_challenges_challenger_id_fkey ( username ),
-      opponent:users!h2h_challenges_opponent_id_fkey ( username )
+      p1:users!h2h_matches_player1_id_fkey ( username ),
+      p2:users!h2h_matches_player2_id_fkey ( username )
     `)
-    .or(`challenger_id.eq.${userId},opponent_id.eq.${userId}`)
-    .order('created_at', { ascending: false });
+    .eq('season', season)
+    .order('gameweek', { ascending: true });
   if (error) throw error;
-  return (data || []).map(r => {
-    const cName = r.challenger?.username;
-    const oName = r.opponent?.username;
-    let winnerName = null;
-    if (r.winner_id === r.challenger_id) winnerName = cName;
-    else if (r.winner_id === r.opponent_id) winnerName = oName;
-    return {
-      ...r,
-      challenger_name: cName,
-      opponent_name: oName,
-      winner_name: winnerName
-    };
-  });
+  return (data || []).map(r => ({
+    ...r,
+    player1_name: r.p1?.username,
+    player2_name: r.p2?.username
+  }));
 };
 
-const getH2HChallenge = async (challengeId) => {
+// Get H2H matches for a specific gameweek
+const getH2HMatchesForGW = async (gameweek, season = 2026) => {
   const { data, error } = await supabase
-    .from('h2h_challenges')
+    .from('h2h_matches')
     .select(`
       *,
-      challenger:users!h2h_challenges_challenger_id_fkey ( username ),
-      opponent:users!h2h_challenges_opponent_id_fkey ( username )
+      p1:users!h2h_matches_player1_id_fkey ( username ),
+      p2:users!h2h_matches_player2_id_fkey ( username )
     `)
-    .eq('id', challengeId)
-    .single();
-  if (error && error.code !== 'PGRST116') throw error;
+    .eq('season', season)
+    .eq('gameweek', gameweek);
+  if (error) throw error;
+  return (data || []).map(r => ({
+    ...r,
+    player1_name: r.p1?.username,
+    player2_name: r.p2?.username
+  }));
+};
+
+// Get a user's H2H match for a specific gameweek
+const getUserH2HMatchForGW = async (userId, gameweek, season = 2026) => {
+  const { data, error } = await supabase
+    .from('h2h_matches')
+    .select(`
+      *,
+      p1:users!h2h_matches_player1_id_fkey ( username ),
+      p2:users!h2h_matches_player2_id_fkey ( username )
+    `)
+    .eq('season', season)
+    .eq('gameweek', gameweek)
+    .or(`player1_id.eq.${userId},player2_id.eq.${userId}`)
+    .maybeSingle();
+  if (error) throw error;
   if (!data) return null;
   return {
     ...data,
-    challenger_name: data.challenger?.username,
-    opponent_name: data.opponent?.username
+    player1_name: data.p1?.username,
+    player2_name: data.p2?.username
   };
 };
 
-const updateH2HScores = async (challengeId, challengerScore, opponentScore, winnerId) => {
+// Bulk insert H2H schedule (used when generating)
+const insertH2HSchedule = async (matches) => {
   const { error } = await supabase
-    .from('h2h_challenges')
-    .update({ challenger_score: challengerScore, opponent_score: opponentScore, winner_id: winnerId, status: 'completed' })
-    .eq('id', challengeId);
+    .from('h2h_matches')
+    .insert(matches);
   if (error) throw error;
 };
 
-// Expire pending H2H challenges for a given gameweek (called when GW starts)
-const expirePendingH2HChallenges = async (gameweek) => {
-  const { data, error } = await supabase
-    .from('h2h_challenges')
-    .update({ status: 'expired' })
-    .eq('gameweek', gameweek)
-    .eq('status', 'pending')
-    .select('id');
+// Check if schedule already exists for a season
+const h2hScheduleExists = async (season = 2026) => {
+  const { count, error } = await supabase
+    .from('h2h_matches')
+    .select('*', { count: 'exact', head: true })
+    .eq('season', season);
   if (error) throw error;
-  return { expired: data ? data.length : 0 };
+  return (count || 0) > 0;
 };
 
-// Count how many challenge PROPOSALS a user has SENT for a specific gameweek (max 2)
-const getUserH2HProposalCountForGW = async (userId, gameweek) => {
-  const { data, error } = await supabase
-    .from('h2h_challenges')
-    .select('id')
-    .eq('gameweek', gameweek)
-    .eq('challenger_id', userId)
-    .in('status', ['pending', 'accepted', 'completed']);
-  if (error) throw error;
-  return data ? data.length : 0;
-};
-
-// Count how many challenges a user has ACCEPTED for a specific gameweek (max 5)
-const getUserH2HAcceptedCountForGW = async (userId, gameweek) => {
-  const { data, error } = await supabase
-    .from('h2h_challenges')
-    .select('id')
-    .eq('gameweek', gameweek)
-    .eq('opponent_id', userId)
-    .in('status', ['accepted', 'completed']);
-  if (error) throw error;
-  return data ? data.length : 0;
-};
-
-// Legacy: count total challenges for a user in a GW (used by info endpoint)
-const getUserH2HChallengeCountForGW = async (userId, gameweek) => {
-  const { data, error } = await supabase
-    .from('h2h_challenges')
-    .select('id')
-    .eq('gameweek', gameweek)
-    .or(`challenger_id.eq.${userId},opponent_id.eq.${userId}`)
-    .in('status', ['pending', 'accepted', 'completed']);
-  if (error) throw error;
-  return data ? data.length : 0;
-};
-
-// Delete expired/declined challenges for a gameweek (cleanup after GW starts)
-const deleteExpiredH2HChallenges = async (gameweek) => {
-  const { data, error } = await supabase
-    .from('h2h_challenges')
+// Delete schedule for a season (for regeneration)
+const deleteH2HSchedule = async (season = 2026) => {
+  const { error } = await supabase
+    .from('h2h_matches')
     .delete()
-    .eq('gameweek', gameweek)
-    .in('status', ['expired', 'declined'])
-    .select('id');
+    .eq('season', season);
   if (error) throw error;
-  return { deleted: data ? data.length : 0 };
 };
 
-// Delete completed challenges for a gameweek (cleanup after GW ends)
-const deleteCompletedH2HChallenges = async (gameweek) => {
-  const { data, error } = await supabase
-    .from('h2h_challenges')
-    .delete()
-    .eq('gameweek', gameweek)
-    .eq('status', 'completed')
-    .select('id');
+// Update H2H match result after scoring
+const updateH2HMatchResult = async (matchId, player1Score, player2Score, winnerId, p1Monkey, p2Monkey) => {
+  const { error } = await supabase
+    .from('h2h_matches')
+    .update({
+      player1_score: player1Score,
+      player2_score: player2Score,
+      winner_id: winnerId,
+      player1_used_monkey: p1Monkey || false,
+      player2_used_monkey: p2Monkey || false,
+      status: 'completed',
+      scored_at: new Date().toISOString()
+    })
+    .eq('id', matchId);
   if (error) throw error;
-  return { deleted: data ? data.length : 0 };
 };
 
-// Get accepted (active) H2H challenges for a gameweek (for scoring)
-const getAcceptedH2HChallengesForGW = async (gameweek) => {
+// Get scheduled (unscored) H2H matches for a gameweek
+const getScheduledH2HMatchesForGW = async (gameweek, season = 2026) => {
   const { data, error } = await supabase
-    .from('h2h_challenges')
+    .from('h2h_matches')
     .select('*')
+    .eq('season', season)
     .eq('gameweek', gameweek)
-    .eq('status', 'accepted');
+    .eq('status', 'scheduled');
   if (error) throw error;
   return data || [];
 };
 
-// Get H2H leaderboard: aggregate points from completed challenges
+// Get H2H leaderboard: aggregate from completed matches
 // Winner = 3 pts, Draw = 1 pt each, Loser = 0 pts
-const getH2HLeaderboard = async () => {
+const getH2HLeaderboard = async (season = 2026) => {
   const { data, error } = await supabase
-    .from('h2h_challenges')
+    .from('h2h_matches')
     .select(`
-      challenger_id, opponent_id, challenger_score, opponent_score, winner_id,
-      challenger:users!h2h_challenges_challenger_id_fkey ( username ),
-      opponent:users!h2h_challenges_opponent_id_fkey ( username )
+      player1_id, player2_id, player1_score, player2_score, winner_id,
+      p1:users!h2h_matches_player1_id_fkey ( username ),
+      p2:users!h2h_matches_player2_id_fkey ( username )
     `)
+    .eq('season', season)
     .eq('status', 'completed');
   if (error) throw error;
 
@@ -586,50 +532,55 @@ const getH2HLeaderboard = async () => {
   const ensure = (id, name) => {
     if (!points[id]) {
       points[id] = 0;
-      stats[id] = { username: name, wins: 0, draws: 0, losses: 0, played: 0 };
+      stats[id] = { username: name, wins: 0, draws: 0, losses: 0, played: 0, goalsFor: 0, goalsAgainst: 0 };
     }
   };
 
-  (data || []).forEach(c => {
-    const cName = c.challenger?.username || 'Unknown';
-    const oName = c.opponent?.username || 'Unknown';
-    ensure(c.challenger_id, cName);
-    ensure(c.opponent_id, oName);
-    stats[c.challenger_id].played++;
-    stats[c.opponent_id].played++;
+  (data || []).forEach(m => {
+    const p1Name = m.p1?.username || 'Unknown';
+    const p2Name = m.p2?.username || 'Unknown';
+    ensure(m.player1_id, p1Name);
+    ensure(m.player2_id, p2Name);
+    stats[m.player1_id].played++;
+    stats[m.player2_id].played++;
+    stats[m.player1_id].goalsFor += m.player1_score || 0;
+    stats[m.player1_id].goalsAgainst += m.player2_score || 0;
+    stats[m.player2_id].goalsFor += m.player2_score || 0;
+    stats[m.player2_id].goalsAgainst += m.player1_score || 0;
 
-    if (c.winner_id === null) {
-      // Draw
-      points[c.challenger_id] += 1;
-      points[c.opponent_id] += 1;
-      stats[c.challenger_id].draws++;
-      stats[c.opponent_id].draws++;
-    } else if (c.winner_id === c.challenger_id) {
-      points[c.challenger_id] += 3;
-      stats[c.challenger_id].wins++;
-      stats[c.opponent_id].losses++;
+    if (m.winner_id === null) {
+      points[m.player1_id] += 1;
+      points[m.player2_id] += 1;
+      stats[m.player1_id].draws++;
+      stats[m.player2_id].draws++;
+    } else if (m.winner_id === m.player1_id) {
+      points[m.player1_id] += 3;
+      stats[m.player1_id].wins++;
+      stats[m.player2_id].losses++;
     } else {
-      points[c.opponent_id] += 3;
-      stats[c.opponent_id].wins++;
-      stats[c.challenger_id].losses++;
+      points[m.player2_id] += 3;
+      stats[m.player2_id].wins++;
+      stats[m.player1_id].losses++;
     }
   });
 
   return Object.entries(points).map(([id, pts]) => ({
     id: parseInt(id),
     username: stats[id].username,
-    glory: pts,
+    points: pts,
     wins: stats[id].wins,
     draws: stats[id].draws,
     losses: stats[id].losses,
-    played: stats[id].played
-  })).sort((a, b) => b.glory - a.glory);
+    played: stats[id].played,
+    gf: stats[id].goalsFor,
+    ga: stats[id].goalsAgainst
+  })).sort((a, b) => b.points - a.points || (b.gf - b.ga) - (a.gf - a.ga));
 };
 
 // Get H2H win count for a user (for achievements)
 const getUserH2HWins = async (userId) => {
   const { data, error } = await supabase
-    .from('h2h_challenges')
+    .from('h2h_matches')
     .select('id')
     .eq('winner_id', userId)
     .eq('status', 'completed');
@@ -895,20 +846,15 @@ module.exports = {
   // Stats
   getUserPredictionCount,
   getUserGameweekScores,
-  // H2H
-  createH2HChallenge,
-  acceptH2HChallenge,
-  declineH2HChallenge,
-  getUserH2HChallenges,
-  getH2HChallenge,
-  updateH2HScores,
-  expirePendingH2HChallenges,
-  getUserH2HChallengeCountForGW,
-  getUserH2HProposalCountForGW,
-  getUserH2HAcceptedCountForGW,
-  getAcceptedH2HChallengesForGW,
-  deleteExpiredH2HChallenges,
-  deleteCompletedH2HChallenges,
+  // H2H (Round-Robin)
+  getH2HSchedule,
+  getH2HMatchesForGW,
+  getUserH2HMatchForGW,
+  insertH2HSchedule,
+  h2hScheduleExists,
+  deleteH2HSchedule,
+  updateH2HMatchResult,
+  getScheduledH2HMatchesForGW,
   getH2HLeaderboard,
   getUserH2HWins,
   // Notifications

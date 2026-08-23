@@ -1264,80 +1264,162 @@ async function getNextChallengeableGW() {
   return 38; // fallback
 }
 
-// Helper: score an H2H challenge by comparing both players' GW scores
-async function scoreH2HChallenge(challenge) {
-  const allMatches = await fetchPremierLeagueMatches(challenge.gameweek);
-  const finishedMatches = allMatches.filter(m => m.status === 'finished' && m.gameweek === challenge.gameweek);
+// ===== H2H ROUND-ROBIN SYSTEM =====
 
-  const challengerPreds = await db.getUserPredictions(challenge.challenger_id);
-  const opponentPreds = await db.getUserPredictions(challenge.opponent_id);
+// Generate a round-robin schedule for all users across 38 gameweeks.
+// Each GW, every player faces exactly 1 opponent. If odd # of players, one gets a bye.
+function generateRoundRobinSchedule(userIds, totalGameweeks = 38) {
+  const ids = [...userIds];
+  const isOdd = ids.length % 2 !== 0;
+  if (isOdd) ids.push(null); // null = bye
+  const n = ids.length;
+  const rounds = [];
 
-  // Resolve first-goal data for bonus scoring
+  // Shuffle for randomness
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+  }
+
+  // Standard round-robin rotation algorithm
+  const fixed = ids[0];
+  const rotating = ids.slice(1);
+
+  for (let round = 0; round < n - 1; round++) {
+    const pairs = [];
+    const all = [fixed, ...rotating];
+    for (let i = 0; i < n / 2; i++) {
+      const p1 = all[i];
+      const p2 = all[n - 1 - i];
+      if (p1 !== null && p2 !== null) {
+        pairs.push([p1, p2]);
+      }
+    }
+    rounds.push(pairs);
+    // Rotate: move last to second position
+    rotating.unshift(rotating.pop());
+  }
+
+  // Distribute rounds across gameweeks (cycle if more GWs than rounds)
+  const schedule = [];
+  for (let gw = 1; gw <= totalGameweeks; gw++) {
+    const roundIdx = (gw - 1) % rounds.length;
+    const pairs = rounds[roundIdx];
+    for (const [p1, p2] of pairs) {
+      schedule.push({ season: parseInt(PL_SEASON_YEAR), gameweek: gw, player1_id: p1, player2_id: p2 });
+    }
+  }
+  return schedule;
+}
+
+// Monkey function: generate random predictions for a player who didn't submit
+// Returns an array of fake prediction objects (only for H2H scoring, never saved to DB)
+function generateMonkeyPredictions(matches) {
+  return matches.map(match => ({
+    matchId: match.id,
+    homeScore: Math.floor(Math.random() * 4),
+    awayScore: Math.floor(Math.random() * 4),
+    firstTeamToScore: Math.random() < 0.5 ? 'home' : 'away',
+    firstScorer: null, // monkey can't guess a player name
+    gameweek: match.gameweek
+  }));
+}
+
+// Score a single H2H match for a given gameweek
+async function scoreH2HMatch(h2hMatch) {
+  const allMatches = await fetchPremierLeagueMatches(h2hMatch.gameweek);
+  const finishedMatches = allMatches.filter(m => m.status === 'finished' && m.gameweek === h2hMatch.gameweek);
+  if (finishedMatches.length === 0) return null; // GW not finished
+
+  // Check all GW matches are finished
+  const gwMatches = allMatches.filter(m => m.gameweek === h2hMatch.gameweek);
+  if (finishedMatches.length < gwMatches.length) return null; // GW still in progress
+
+  const p1Preds = await db.getUserPredictions(h2hMatch.player1_id);
+  const p2Preds = await db.getUserPredictions(h2hMatch.player2_id);
+
+  const p1GWPreds = p1Preds.filter(p => p.gameweek === h2hMatch.gameweek);
+  const p2GWPreds = p2Preds.filter(p => p.gameweek === h2hMatch.gameweek);
+
+  // Determine if monkey predictions are needed
+  const p1UsedMonkey = p1GWPreds.length === 0;
+  const p2UsedMonkey = p2GWPreds.length === 0;
+
+  const p1Effective = p1UsedMonkey ? generateMonkeyPredictions(finishedMatches) : p1GWPreds;
+  const p2Effective = p2UsedMonkey ? generateMonkeyPredictions(finishedMatches) : p2GWPreds;
+
   const firstGoalByMatch = await getFirstGoalMap(finishedMatches);
 
-  let challengerScore = 0;
-  let opponentScore = 0;
+  let p1Score = 0;
+  let p2Score = 0;
 
   for (const match of finishedMatches) {
-    const cPred = challengerPreds.find(p => p.matchId == match.id && p.gameweek === challenge.gameweek);
-    const oPred = opponentPreds.find(p => p.matchId == match.id && p.gameweek === challenge.gameweek);
-
+    const p1Pred = p1Effective.find(p => p.matchId == match.id);
+    const p2Pred = p2Effective.find(p => p.matchId == match.id);
     const fg = firstGoalByMatch[match.id];
 
-    if (cPred) {
-      let pts = calculatePoints({ homeScore: cPred.homeScore, awayScore: cPred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
+    if (p1Pred) {
+      let pts = calculatePoints({ homeScore: p1Pred.homeScore, awayScore: p1Pred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
       if (fg && fg.resolved) {
-        pts += goalEvents.scoreFirstTeam(cPred.firstTeamToScore, fg.firstTeam);
-        pts += goalEvents.scoreFirstScorer(cPred.firstScorer, fg.firstScorer);
+        pts += goalEvents.scoreFirstTeam(p1Pred.firstTeamToScore, fg.firstTeam);
+        pts += goalEvents.scoreFirstScorer(p1Pred.firstScorer, fg.firstScorer);
       }
-      challengerScore += pts;
+      p1Score += pts;
     }
-    if (oPred) {
-      let pts = calculatePoints({ homeScore: oPred.homeScore, awayScore: oPred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
+    if (p2Pred) {
+      let pts = calculatePoints({ homeScore: p2Pred.homeScore, awayScore: p2Pred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
       if (fg && fg.resolved) {
-        pts += goalEvents.scoreFirstTeam(oPred.firstTeamToScore, fg.firstTeam);
-        pts += goalEvents.scoreFirstScorer(oPred.firstScorer, fg.firstScorer);
+        pts += goalEvents.scoreFirstTeam(p2Pred.firstTeamToScore, fg.firstTeam);
+        pts += goalEvents.scoreFirstScorer(p2Pred.firstScorer, fg.firstScorer);
       }
-      opponentScore += pts;
+      p2Score += pts;
     }
   }
 
-  // Determine winner (null = draw)
   let winnerId = null;
-  if (challengerScore > opponentScore) winnerId = challenge.challenger_id;
-  else if (opponentScore > challengerScore) winnerId = challenge.opponent_id;
+  if (p1Score > p2Score) winnerId = h2hMatch.player1_id;
+  else if (p2Score > p1Score) winnerId = h2hMatch.player2_id;
 
-  await db.updateH2HScores(challenge.id, challengerScore, opponentScore, winnerId);
-  return { challengerScore, opponentScore, winnerId };
+  await db.updateH2HMatchResult(h2hMatch.id, p1Score, p2Score, winnerId, p1UsedMonkey, p2UsedMonkey);
+  return { p1Score, p2Score, winnerId, p1UsedMonkey, p2UsedMonkey };
 }
 
-// Auto-expire pending challenges & score completed GWs (called by scheduler)
-async function processH2HChallenges() {
+// Process H2H: score all completed GWs that haven't been scored yet
+async function processH2HMatches() {
   try {
     const currentGW = await getCurrentGameweek();
-    // Expire pending challenges for current and past GWs
-    for (let gw = 1; gw <= currentGW; gw++) {
-      await db.expirePendingH2HChallenges(gw);
-    }
-    // Score accepted challenges for finished GWs
     for (let gw = 1; gw < currentGW; gw++) {
-      const accepted = await db.getAcceptedH2HChallengesForGW(gw);
-      for (const ch of accepted) {
-        await scoreH2HChallenge(ch);
+      const scheduled = await db.getScheduledH2HMatchesForGW(gw);
+      for (const match of scheduled) {
+        await scoreH2HMatch(match);
       }
     }
-    // Cleanup: delete expired/declined challenges after GW starts
-    for (let gw = 1; gw <= currentGW; gw++) {
-      await db.deleteExpiredH2HChallenges(gw);
-    }
-    // NOTE: Do NOT delete completed challenges - they are needed for the H2H leaderboard.
-    // The leaderboard aggregates wins/draws/losses/glory from completed challenges.
   } catch (e) {
     console.error('[H2H] Process error:', e.message);
   }
 }
 
-// Search users for H2H challenge
+// Ensure the H2H schedule exists (auto-generate on startup if needed)
+async function ensureH2HSchedule() {
+  try {
+    const exists = await db.h2hScheduleExists(parseInt(PL_SEASON_YEAR));
+    if (!exists) {
+      const allUsers = await db.getAllUsers();
+      if (allUsers.length >= 2) {
+        const userIds = allUsers.map(u => u.id);
+        const schedule = generateRoundRobinSchedule(userIds, 38);
+        await db.insertH2HSchedule(schedule);
+        console.log(`[H2H] Generated round-robin schedule for ${allUsers.length} players (${schedule.length} matches)`);
+      } else {
+        console.log('[H2H] Not enough players to generate schedule (need >= 2)');
+      }
+    }
+  } catch (e) {
+    console.error('[H2H] Schedule generation error:', e.message);
+  }
+}
+
+// Search users (kept for other features)
 app.get('/api/users/search', authenticateToken, async (req, res) => {
   try {
     const { q } = req.query;
@@ -1349,103 +1431,29 @@ app.get('/api/users/search', authenticateToken, async (req, res) => {
   }
 });
 
-// Create H2H challenge — only for next challengeable gameweek, max 2 proposals per GW
-app.post('/api/h2h/challenge', authenticateToken, async (req, res) => {
+// Get H2H matches for a gameweek (all matchups)
+app.get('/api/h2h/matches', authenticateToken, async (req, res) => {
   try {
-    const { opponentId, gameweek } = req.body;
-    if (!opponentId || !gameweek) return res.status(400).json({ error: 'Opponent and gameweek required' });
-    if (opponentId === req.userId) return res.status(400).json({ error: 'Cannot challenge yourself' });
-
-    // Enforce: challenges only for a GW whose deadline hasn't passed
-    const challengeGW = await getNextChallengeableGW();
-    if (gameweek !== challengeGW) {
-      return res.status(400).json({ error: `You can only challenge for Gameweek ${challengeGW}` });
-    }
-
-    // Enforce: max 1 challenge PROPOSAL per gameweek per user
-    const proposalCount = await db.getUserH2HProposalCountForGW(req.userId, gameweek);
-    if (proposalCount >= 1) {
-      return res.status(400).json({ error: 'You can only send 1 challenge per gameweek' });
-    }
-
-    const result = await db.createH2HChallenge(req.userId, opponentId, gameweek);
-    const challenger = await db.getUserById(req.userId);
-
-    // Notify opponent
-    await db.createNotification(opponentId, 'h2h_challenge', 'New Challenge!',
-      `${challenger.username} challenged you for Gameweek ${gameweek}!`,
-      { challengeId: result.id, gameweek });
-
-    io.emit('notification', { userId: opponentId, type: 'h2h_challenge' });
-    sendPushToUser(opponentId, 'New Challenge!', `${challenger.username} challenged you for Gameweek ${gameweek}!`, '/');
-
-    res.json(result);
+    const gw = req.query.gameweek ? parseInt(req.query.gameweek) : await getCurrentGameweek();
+    const matches = await db.getH2HMatchesForGW(gw);
+    res.json({ gameweek: gw, matches });
   } catch (error) {
-    res.status(400).json({ error: error.message || 'Failed to create challenge' });
+    res.status(500).json({ error: 'Failed to fetch H2H matches' });
   }
 });
 
-// Accept H2H challenge
-app.post('/api/h2h/:id/accept', authenticateToken, async (req, res) => {
+// Get current user's H2H match for a gameweek
+app.get('/api/h2h/my-match', authenticateToken, async (req, res) => {
   try {
-    // Check that the GW hasn't started yet
-    const challenge = await db.getH2HChallenge(parseInt(req.params.id));
-    if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
-
-    const gwMatches = await fetchPremierLeagueMatches(challenge.gameweek);
-    const deadline = calculateGameweekDeadline(gwMatches.filter(m => m.gameweek === challenge.gameweek));
-    if (deadline && new Date() >= new Date(deadline)) {
-      await db.expirePendingH2HChallenges(challenge.gameweek);
-      return res.status(400).json({ error: 'This gameweek has already started — challenge expired' });
-    }
-
-    // Enforce: max 1 accepted challenge per GW for the accepting user
-    const acceptedCount = await db.getUserH2HAcceptedCountForGW(req.userId, challenge.gameweek);
-    if (acceptedCount >= 1) {
-      return res.status(400).json({ error: 'You can only accept 1 challenge per gameweek' });
-    }
-
-    await db.acceptH2HChallenge(parseInt(req.params.id), req.userId);
-    const updated = await db.getH2HChallenge(parseInt(req.params.id));
-
-    await db.createNotification(updated.challenger_id, 'h2h_accepted', 'Challenge Accepted!',
-      `${updated.opponent_name} accepted your GW${updated.gameweek} challenge!`,
-      { challengeId: updated.id });
-    io.emit('notification', { userId: updated.challenger_id, type: 'h2h_accepted' });
-    sendPushToUser(updated.challenger_id, 'Challenge Accepted!', `${updated.opponent_name} accepted your GW${updated.gameweek} challenge!`, '/');
-
-    res.json({ message: 'Challenge accepted' });
+    const gw = req.query.gameweek ? parseInt(req.query.gameweek) : await getCurrentGameweek();
+    const match = await db.getUserH2HMatchForGW(req.userId, gw);
+    res.json({ gameweek: gw, match });
   } catch (error) {
-    res.status(400).json({ error: error.message || 'Failed to accept challenge' });
+    res.status(500).json({ error: 'Failed to fetch your H2H match' });
   }
 });
 
-// Decline H2H challenge
-app.post('/api/h2h/:id/decline', authenticateToken, async (req, res) => {
-  try {
-    await db.declineH2HChallenge(parseInt(req.params.id), req.userId);
-    res.json({ message: 'Challenge declined' });
-  } catch (error) {
-    res.status(400).json({ error: 'Failed to decline challenge' });
-  }
-});
-
-// Get user's H2H challenges (optionally filtered by gameweek)
-app.get('/api/h2h', authenticateToken, async (req, res) => {
-  try {
-    const challenges = await db.getUserH2HChallenges(req.userId);
-    const gwFilter = req.query.gameweek ? parseInt(req.query.gameweek) : null;
-    if (gwFilter) {
-      res.json(challenges.filter(c => c.gameweek === gwFilter));
-    } else {
-      res.json(challenges);
-    }
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch challenges' });
-  }
-});
-
-// Get H2H leaderboard (separate from main leaderboard)
+// Get H2H leaderboard
 app.get('/api/h2h/leaderboard', async (req, res) => {
   try {
     const leaderboard = await db.getH2HLeaderboard();
@@ -1456,45 +1464,18 @@ app.get('/api/h2h/leaderboard', async (req, res) => {
   }
 });
 
-// Get current GW info for H2H (so frontend knows which GW to challenge for)
-app.get('/api/h2h/info', authenticateToken, async (req, res) => {
+// Admin: regenerate H2H schedule (deletes existing and creates new)
+app.post('/api/h2h/regenerate', authenticateToken, async (req, res) => {
   try {
-    const currentGW = await getCurrentGameweek();
-    const challengeGW = await getNextChallengeableGW();
-    const proposalCount = await db.getUserH2HProposalCountForGW(req.userId, challengeGW);
-    const acceptedCount = await db.getUserH2HAcceptedCountForGW(req.userId, challengeGW);
-    res.json({
-      currentGameweek: currentGW,
-      challengeGameweek: challengeGW,
-      proposalsSent: proposalCount,
-      maxProposals: 1,
-      challengesAccepted: acceptedCount,
-      maxAccepts: 1
-    });
+    const allUsers = await db.getAllUsers();
+    if (allUsers.length < 2) return res.status(400).json({ error: 'Need at least 2 players' });
+    await db.deleteH2HSchedule(parseInt(PL_SEASON_YEAR));
+    const userIds = allUsers.map(u => u.id);
+    const schedule = generateRoundRobinSchedule(userIds, 38);
+    await db.insertH2HSchedule(schedule);
+    res.json({ message: `Schedule regenerated for ${allUsers.length} players`, totalMatches: schedule.length });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to get H2H info' });
-  }
-});
-
-// Get single H2H challenge detail
-app.get('/api/h2h/:id', authenticateToken, async (req, res) => {
-  try {
-    const challenge = await db.getH2HChallenge(parseInt(req.params.id));
-    if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
-
-    const challengerPreds = await db.getUserPredictions(challenge.challenger_id);
-    const opponentPreds = await db.getUserPredictions(challenge.opponent_id);
-
-    const gwChallengerPreds = challengerPreds.filter(p => p.gameweek === challenge.gameweek);
-    const gwOpponentPreds = opponentPreds.filter(p => p.gameweek === challenge.gameweek);
-
-    res.json({
-      ...challenge,
-      challengerPredictions: gwChallengerPreds,
-      opponentPredictions: gwOpponentPreds
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch challenge' });
+    res.status(500).json({ error: 'Failed to regenerate schedule' });
   }
 });
 
@@ -2037,8 +2018,8 @@ const startNotificationScheduler = () => {
         }
       }
       
-      // --- Process H2H challenges (expire pending, score completed) ---
-      await processH2HChallenges();
+      // --- Process H2H matches (score completed GWs) ---
+      await processH2HMatches();
 
       // --- GW deadline reminder (~2 hours before first match of each GW) ---
       for (let gw = 1; gw <= 38; gw++) {
@@ -2092,8 +2073,9 @@ async function initApp() {
       startNotificationScheduler();
     }
     
-    // Run H2H cleanup on startup
-    processH2HChallenges().catch(e => console.error('[H2H] Startup cleanup error:', e.message));
+    // Generate H2H schedule if needed, then score any completed GWs
+    await ensureH2HSchedule();
+    processH2HMatches().catch(e => console.error('[H2H] Startup scoring error:', e.message));
 
     console.log(`Full app ready for connections`);
   } catch (error) {

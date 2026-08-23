@@ -2277,6 +2277,89 @@ body {
     min-height: 36px;
 }
 
+/* H2H My Match Card */
+.h2h-my-match-card {
+    background: linear-gradient(135deg, rgba(102,126,234,0.15), rgba(118,75,162,0.15));
+    border: 1px solid rgba(102,126,234,0.3);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.h2h-my-match-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: rgba(255,255,255,0.8);
+}
+
+.h2h-my-match-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+}
+
+.h2h-result-badge {
+    font-size: 0.7rem;
+    font-weight: 800;
+    padding: 0.2rem 0.6rem;
+    border-radius: 20px;
+    text-transform: uppercase;
+}
+.h2h-result-badge.win { background: #28a745; color: white; }
+.h2h-result-badge.loss { background: #dc3545; color: white; }
+.h2h-result-badge.draw { background: #ffc107; color: #333; }
+.h2h-result-badge.scheduled { background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.7); }
+
+/* H2H League Table */
+.h2h-league-table {
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+.h2h-table-header {
+    display: grid;
+    grid-template-columns: 30px 1fr 30px 30px 30px 30px 40px 40px;
+    padding: 0.6rem 0.75rem;
+    background: rgba(102,126,234,0.2);
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: rgba(255,255,255,0.6);
+    text-transform: uppercase;
+}
+
+.h2h-table-row {
+    display: grid;
+    grid-template-columns: 30px 1fr 30px 30px 30px 30px 40px 40px;
+    padding: 0.55rem 0.75rem;
+    font-size: 0.8rem;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.8);
+    align-items: center;
+}
+
+.h2h-table-row.is-me {
+    background: rgba(102,126,234,0.1);
+    font-weight: 700;
+}
+
+.h2h-table-row.top-3 .h2h-col-rank {
+    color: #ffd700;
+    font-weight: 800;
+}
+
+.h2h-col-rank { text-align: center; }
+.h2h-col-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h2h-col-p, .h2h-col-w, .h2h-col-d, .h2h-col-l { text-align: center; }
+.h2h-col-gd { text-align: center; font-size: 0.75rem; }
+.h2h-col-pts { text-align: center; color: #ffd700; }
+
 /* H2H Search Results */
 .h2h-search-results {
     max-height: 200px;
