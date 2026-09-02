@@ -607,22 +607,71 @@
     </button>
     
     <div id="adminPanel" class="admin-panel">
-        <h4>Admin Panel (Testing)</h4>
-        <form onsubmit="updateMatchResult(event)">
-            <div class="form-group">
-                <label>Match ID:</label>
-                <input type="number" id="adminMatchId" min="1" max="10" required>
+        <h4>Admin Panel</h4>
+
+        <!-- First-Goal Manual Entry -->
+        <div class="admin-section">
+            <h5><i class="fas fa-futbol"></i> First Goal Data</h5>
+            <p style="font-size:0.7rem;color:#999;margin:0 0 0.5rem;">Set first team to score &amp; first scorer for bonus points.</p>
+            <div id="firstGoalList" style="max-height:400px;overflow-y:auto;"></div>
+            <button class="btn btn-secondary" onclick="loadFirstGoalAdmin()" style="margin-top:0.5rem;width:100%;font-size:0.75rem;">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+
+        <hr style="border-color:rgba(255,255,255,0.1);margin:1rem 0;">
+
+        <!-- Legacy match result update -->
+        <div class="admin-section">
+            <h5>Update Match Result</h5>
+            <form onsubmit="updateMatchResult(event)">
+                <div class="form-group">
+                    <label>Match ID:</label>
+                    <input type="number" id="adminMatchId" min="1" max="999999" required>
+                </div>
+                <div class="form-group">
+                    <label>Home Score:</label>
+                    <input type="number" id="adminHomeScore" min="0" max="20" required>
+                </div>
+                <div class="form-group">
+                    <label>Away Score:</label>
+                    <input type="number" id="adminAwayScore" min="0" max="20" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%;">Update Result</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- First-Goal Edit Modal -->
+    <div id="firstGoalModal" class="modal" style="display:none;">
+        <div class="modal-content" style="max-width:420px;">
+            <div class="modal-header">
+                <h4 id="fgModalTitle"><i class="fas fa-futbol"></i> Edit First Goal</h4>
+                <span class="close" onclick="document.getElementById('firstGoalModal').style.display='none'">&times;</span>
             </div>
-            <div class="form-group">
-                <label>Home Score:</label>
-                <input type="number" id="adminHomeScore" min="0" max="20" required>
+            <div class="modal-body">
+                <input type="hidden" id="fgMatchId">
+                <div class="form-group">
+                    <label>First Team to Score:</label>
+                    <select id="fgFirstTeam" onchange="onFgTeamChange()">
+                        <option value="">-- Select --</option>
+                        <option value="home">Home</option>
+                        <option value="away">Away</option>
+                        <option value="none">None (0-0)</option>
+                    </select>
+                </div>
+                <div class="form-group" id="fgScorerGroup">
+                    <label>First Scorer:</label>
+                    <input type="text" id="fgFirstScorer" list="fgPlayerList" placeholder="Type or select player name" autocomplete="off">
+                    <datalist id="fgPlayerList"></datalist>
+                </div>
+                <div style="display:flex;gap:0.5rem;margin-top:1rem;">
+                    <button class="btn btn-primary" onclick="saveFirstGoal()" style="flex:1;"><i class="fas fa-save"></i> Save</button>
+                    <button class="btn btn-secondary" onclick="clearFirstGoal()" style="flex:1;"><i class="fas fa-trash"></i> Clear Override</button>
+                </div>
+                <div id="fgStatus" style="margin-top:0.5rem;font-size:0.75rem;text-align:center;"></div>
             </div>
-            <div class="form-group">
-                <label>Away Score:</label>
-                <input type="number" id="adminAwayScore" min="0" max="20" required>
-            </div>
-            <button type="submit" class="btn btn-primary">Update Result</button>
-        </form>
+        </div>
     </div>
 
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>

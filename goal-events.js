@@ -12,12 +12,15 @@ const BASE = `https://www.thesportsdb.com/api/v1/json/${TSDB_KEY}`;
 const PL_LEAGUE_ID = '4328';
 
 const EVENTS_CACHE_FILE = path.join(__dirname, 'goal-events-cache.json');
+const OVERRIDES_FILE = path.join(__dirname, 'first-goal-overrides.json');
 const EVENTS_TTL_MS = 30 * 60 * 1000; // refresh season event list every 30 min
 
 // In-memory caches
 let seasonEventsCache = { season: null, fetchedAt: 0, events: [] };
 // Permanent per-match first-goal cache: { [matchKey]: { firstTeam, firstScorer, resolved } }
 let firstGoalCache = {};
+// Manual admin overrides: { [matchKey]: { firstTeam, firstScorer } } - authoritative
+let firstGoalOverrides = {};
 // Squad cache: { [teamKey]: { fetchedAt, players: [names] } }
 let squadCache = {};
 
@@ -42,7 +45,50 @@ function saveCache() {
   }
 }
 
+function loadOverrides() {
+  try {
+    if (fs.existsSync(OVERRIDES_FILE)) {
+      firstGoalOverrides = JSON.parse(fs.readFileSync(OVERRIDES_FILE, 'utf8')) || {};
+      console.log(`[GoalEvents] Loaded ${Object.keys(firstGoalOverrides).length} first-goal overrides`);
+    }
+  } catch (e) {
+    console.error('[GoalEvents] Failed to load overrides:', e.message);
+  }
+}
+
+function saveOverrides() {
+  try {
+    fs.writeFileSync(OVERRIDES_FILE, JSON.stringify(firstGoalOverrides, null, 2), 'utf8');
+  } catch (e) {
+    console.error('[GoalEvents] Failed to save overrides:', e.message);
+  }
+}
+
+// Set (or clear) a manual override for a match. firstTeam: 'home'|'away'|'none', firstScorer: string|null
+function setFirstGoalOverride(matchKey, firstTeam, firstScorer) {
+  const key = String(matchKey);
+  if (firstTeam == null && firstScorer == null) {
+    delete firstGoalOverrides[key];
+  } else {
+    firstGoalOverrides[key] = {
+      firstTeam: firstTeam || null,
+      firstScorer: firstTeam === 'none' ? null : (firstScorer || null)
+    };
+  }
+  saveOverrides();
+  return firstGoalOverrides[key] || null;
+}
+
+function getFirstGoalOverride(matchKey) {
+  return firstGoalOverrides[String(matchKey)] || null;
+}
+
+function getAllOverrides() {
+  return { ...firstGoalOverrides };
+}
+
 loadCache();
+loadOverrides();
 
 // ---- Team name normalization ----
 // Reduce any team name (football-data.org full names OR TheSportsDB names) to
@@ -190,6 +236,12 @@ function findEvent(events, homeTeam, awayTeam) {
 // ---- Get first goal (team + scorer) for a specific match ----
 // homeTeam/awayTeam are football-data.org names; matchKey is a stable id used for caching.
 async function getFirstGoal(seasonYear, matchKey, homeTeam, awayTeam) {
+  // Manual admin override takes precedence over everything else
+  const override = firstGoalOverrides[String(matchKey)];
+  if (override && override.firstTeam) {
+    return { firstTeam: override.firstTeam, firstScorer: override.firstScorer || null, resolved: true, source: 'override' };
+  }
+
   // Return permanently cached resolved result
   if (firstGoalCache[matchKey] && firstGoalCache[matchKey].resolved) {
     return firstGoalCache[matchKey];
@@ -255,5 +307,8 @@ module.exports = {
   fetchSeasonEvents,
   getFirstGoal,
   scoreFirstTeam,
-  scoreFirstScorer
+  scoreFirstScorer,
+  setFirstGoalOverride,
+  getFirstGoalOverride,
+  getAllOverrides
 };

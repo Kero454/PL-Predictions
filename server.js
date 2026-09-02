@@ -887,6 +887,121 @@ app.post('/api/admin/set-scores', async (req, res) => {
   }
 });
 
+// ===== RECALCULATE ALL SCORES =====
+// Shared helper: mirrors the leaderboard scoring logic so we can trigger a
+// full recalc after admin changes (e.g. first-goal overrides) without the
+// user needing to open the leaderboard page.
+async function recalculateAllScores() {
+  const allMatches = await fetchPremierLeagueMatches();
+  const finishedMatches = allMatches.filter(m => m.status === 'finished');
+  const allUsers = await db.getAllUsers();
+  const allPredictions = await db.getAllPredictions();
+  const firstGoalByMatch = await getFirstGoalMap(finishedMatches);
+
+  for (const user of allUsers) {
+    let totalScore = 0;
+    for (const match of finishedMatches) {
+      const prediction = allPredictions.find(p => p.userId === user.id && p.matchId == match.id);
+      if (!prediction) continue;
+      let matchScore = calculatePoints(
+        { homeScore: prediction.homeScore, awayScore: prediction.awayScore, isDoubler: false },
+        match.homeScore, match.awayScore
+      );
+      const doubler = await db.getUserDoubler(user.id, match.gameweek);
+      const isDoublerMatch = doubler && doubler.matchId == match.id;
+      if (isDoublerMatch) matchScore *= 2;
+      const fg = firstGoalByMatch[match.id];
+      if (fg && fg.resolved) {
+        let bonus = 0;
+        bonus += goalEvents.scoreFirstTeam(prediction.firstTeamToScore, fg.firstTeam);
+        bonus += goalEvents.scoreFirstScorer(prediction.firstScorer, fg.firstScorer);
+        if (isDoublerMatch) bonus *= 2;
+        matchScore += bonus;
+      }
+      totalScore += matchScore;
+    }
+    const adjustment = db.getScoreAdjustment(user.id);
+    totalScore += adjustment;
+    await db.updateUserScore(user.id, totalScore);
+  }
+  console.log('[Scoring] Recalculated all user scores');
+}
+
+// ===== ADMIN: FIRST-GOAL MANUAL ENTRY =====
+// The free TheSportsDB tier only resolves ~5 matches/season, so first-team/
+// first-scorer bonuses must be entered manually to score correctly.
+
+// List all finished matches with their current resolved data + any manual override
+app.get('/api/admin/first-goals', async (req, res) => {
+  try {
+    const allMatches = await fetchPremierLeagueMatches();
+    const finished = allMatches.filter(m => m.status === 'finished');
+    const firstGoalByMatch = await getFirstGoalMap(finished);
+
+    const rows = finished.map(m => {
+      const override = goalEvents.getFirstGoalOverride(String(m.id));
+      const auto = firstGoalByMatch[m.id] || { firstTeam: null, firstScorer: null, resolved: false };
+      const effective = override && override.firstTeam ? { ...override, source: 'override', resolved: true } : auto;
+      return {
+        matchId: m.id,
+        gameweek: m.gameweek,
+        homeTeam: m.homeTeam,
+        awayTeam: m.awayTeam,
+        homeScore: m.homeScore,
+        awayScore: m.awayScore,
+        auto: { firstTeam: auto.firstTeam, firstScorer: auto.firstScorer, resolved: auto.resolved },
+        override: override || null,
+        effective: { firstTeam: effective.firstTeam || null, firstScorer: effective.firstScorer || null, resolved: !!effective.resolved, source: override && override.firstTeam ? 'override' : (auto.resolved ? 'api' : 'none') }
+      };
+    });
+    // Sort by gameweek then match
+    rows.sort((a, b) => a.gameweek - b.gameweek || a.matchId - b.matchId);
+    res.json({ matches: rows });
+  } catch (error) {
+    console.error('First-goals list error:', error);
+    res.status(500).json({ error: 'Failed to list first goals' });
+  }
+});
+
+// Get squad player names for the two teams of a match (for the scorer dropdown)
+app.get('/api/admin/first-goals/:matchId/players', async (req, res) => {
+  try {
+    const matchId = parseInt(req.params.matchId);
+    const allMatches = await fetchPremierLeagueMatches();
+    const match = allMatches.find(m => m.id == matchId);
+    if (!match) return res.status(404).json({ error: 'Match not found' });
+    const homePlayers = await getSquadForTeam(match.homeTeamId);
+    const awayPlayers = await getSquadForTeam(match.awayTeamId);
+    res.json({
+      homeTeam: match.homeTeam,
+      awayTeam: match.awayTeam,
+      homePlayers: homePlayers.map(p => p.name || p),
+      awayPlayers: awayPlayers.map(p => p.name || p)
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get players' });
+  }
+});
+
+// Save (or clear) a manual first-goal override for a match, then recalc scores
+app.post('/api/admin/first-goals', async (req, res) => {
+  try {
+    const { matchId, firstTeam, firstScorer } = req.body;
+    if (!matchId) return res.status(400).json({ error: 'matchId required' });
+    // Validate firstTeam
+    const ft = (firstTeam === 'home' || firstTeam === 'away' || firstTeam === 'none') ? firstTeam : null;
+    if (firstTeam && !ft) return res.status(400).json({ error: "firstTeam must be 'home', 'away', or 'none'" });
+    const scorer = ft === 'none' ? null : (typeof firstScorer === 'string' && firstScorer.trim() ? firstScorer.trim() : null);
+    const saved = goalEvents.setFirstGoalOverride(String(matchId), ft, scorer);
+    // Recalculate everyone's score immediately so the leaderboard reflects the change
+    await recalculateAllScores();
+    res.json({ message: 'Saved', override: saved });
+  } catch (error) {
+    console.error('First-goal save error:', error);
+    res.status(500).json({ error: 'Failed to save first goal' });
+  }
+});
+
 // ===== BADGE DEFINITIONS =====
 // Tiers: Beginner (easy) → Veteran → Elite → Mythic (hardest)
 // Better titles require significantly more effort to earn

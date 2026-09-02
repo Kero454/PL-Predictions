@@ -784,6 +784,9 @@ function updateLeaderboardDisplay(leaderboard) {
 function toggleAdminPanel() {
     const panel = document.getElementById('adminPanel');
     panel.classList.toggle('show');
+    if (panel.classList.contains('show')) {
+        loadFirstGoalAdmin();
+    }
 }
 
 async function updateMatchResult(event) {
@@ -816,6 +819,137 @@ async function updateMatchResult(event) {
         }
     } catch (error) {
         showError('Failed to update match result');
+    }
+}
+
+// ===== FIRST-GOAL ADMIN =====
+let fgMatchesData = [];
+
+async function loadFirstGoalAdmin() {
+    const container = document.getElementById('firstGoalList');
+    if (!container) return;
+    container.innerHTML = '<div style="text-align:center;color:#999;padding:0.5rem;"><i class="fas fa-spinner fa-spin"></i></div>';
+    try {
+        const res = await fetch('/api/admin/first-goals');
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        fgMatchesData = data.matches || [];
+        renderFirstGoalList();
+    } catch (e) {
+        container.innerHTML = '<div style="color:#f44;font-size:0.75rem;">Failed to load</div>';
+    }
+}
+
+function renderFirstGoalList() {
+    const container = document.getElementById('firstGoalList');
+    if (!fgMatchesData.length) {
+        container.innerHTML = '<div style="color:#999;font-size:0.75rem;">No finished matches yet.</div>';
+        return;
+    }
+    let currentGW = 0;
+    let html = '';
+    for (const m of fgMatchesData) {
+        if (m.gameweek !== currentGW) {
+            currentGW = m.gameweek;
+            html += `<div style="font-size:0.65rem;color:#667eea;font-weight:700;margin:0.5rem 0 0.25rem;border-bottom:1px solid rgba(255,255,255,0.06);padding-bottom:2px;">GW${currentGW}</div>`;
+        }
+        const eff = m.effective;
+        const src = eff.source;
+        let statusIcon = '';
+        let statusColor = '';
+        if (src === 'override') { statusIcon = 'fas fa-pen'; statusColor = '#4caf50'; }
+        else if (src === 'api') { statusIcon = 'fas fa-robot'; statusColor = '#667eea'; }
+        else { statusIcon = 'fas fa-exclamation-triangle'; statusColor = '#ff9800'; }
+
+        const ftLabel = eff.firstTeam === 'home' ? m.homeTeam : eff.firstTeam === 'away' ? m.awayTeam : eff.firstTeam === 'none' ? '0-0' : '—';
+        const scorerLabel = eff.firstScorer || (eff.firstTeam === 'none' ? 'N/A' : '—');
+
+        html += `<div class="fg-row" onclick="openFirstGoalEdit(${m.matchId})" style="cursor:pointer;display:flex;align-items:center;gap:0.4rem;padding:0.35rem 0.25rem;border-radius:6px;font-size:0.7rem;" onmouseenter="this.style.background='rgba(255,255,255,0.05)'" onmouseleave="this.style.background='none'">
+            <i class="${statusIcon}" style="color:${statusColor};font-size:0.6rem;width:14px;text-align:center;" title="${src}"></i>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.homeTeam} ${m.homeScore}-${m.awayScore} ${m.awayTeam}</span>
+            <span style="color:${statusColor};font-size:0.6rem;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${ftLabel} / ${scorerLabel}">${ftLabel}</span>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+async function openFirstGoalEdit(matchId) {
+    const m = fgMatchesData.find(x => x.matchId === matchId);
+    if (!m) return;
+    document.getElementById('fgMatchId').value = matchId;
+    document.getElementById('fgModalTitle').innerHTML = `<i class="fas fa-futbol"></i> ${m.homeTeam} ${m.homeScore}-${m.awayScore} ${m.awayTeam}`;
+    document.getElementById('fgFirstTeam').value = m.effective.firstTeam || '';
+    document.getElementById('fgFirstScorer').value = m.effective.firstScorer || '';
+    document.getElementById('fgStatus').textContent = '';
+    onFgTeamChange();
+    document.getElementById('firstGoalModal').style.display = 'block';
+
+    // Load player names for datalist
+    try {
+        const res = await fetch(`/api/admin/first-goals/${matchId}/players`);
+        if (res.ok) {
+            const data = await res.json();
+            const dl = document.getElementById('fgPlayerList');
+            dl.innerHTML = '';
+            const all = [...(data.homePlayers || []), ...(data.awayPlayers || [])].sort();
+            all.forEach(p => { const o = document.createElement('option'); o.value = p; dl.appendChild(o); });
+        }
+    } catch (e) { /* ignore */ }
+}
+
+function onFgTeamChange() {
+    const val = document.getElementById('fgFirstTeam').value;
+    document.getElementById('fgScorerGroup').style.display = val === 'none' ? 'none' : 'block';
+    if (val === 'none') document.getElementById('fgFirstScorer').value = '';
+}
+
+async function saveFirstGoal() {
+    const matchId = parseInt(document.getElementById('fgMatchId').value);
+    const firstTeam = document.getElementById('fgFirstTeam').value;
+    const firstScorer = document.getElementById('fgFirstScorer').value.trim();
+    const statusEl = document.getElementById('fgStatus');
+    if (!firstTeam) { statusEl.textContent = 'Please select first team to score'; statusEl.style.color = '#f44'; return; }
+
+    statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving & recalculating scores...';
+    statusEl.style.color = '#999';
+    try {
+        const res = await fetch('/api/admin/first-goals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ matchId, firstTeam, firstScorer: firstScorer || null })
+        });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed'); }
+        statusEl.textContent = 'Saved! Scores recalculated.';
+        statusEl.style.color = '#4caf50';
+        document.getElementById('firstGoalModal').style.display = 'none';
+        loadFirstGoalAdmin();
+        loadLeaderboard();
+    } catch (e) {
+        statusEl.textContent = e.message;
+        statusEl.style.color = '#f44';
+    }
+}
+
+async function clearFirstGoal() {
+    const matchId = parseInt(document.getElementById('fgMatchId').value);
+    const statusEl = document.getElementById('fgStatus');
+    statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing...';
+    statusEl.style.color = '#999';
+    try {
+        const res = await fetch('/api/admin/first-goals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ matchId, firstTeam: null, firstScorer: null })
+        });
+        if (!res.ok) throw new Error('Failed');
+        statusEl.textContent = 'Override cleared.';
+        statusEl.style.color = '#4caf50';
+        document.getElementById('firstGoalModal').style.display = 'none';
+        loadFirstGoalAdmin();
+        loadLeaderboard();
+    } catch (e) {
+        statusEl.textContent = e.message;
+        statusEl.style.color = '#f44';
     }
 }
 
