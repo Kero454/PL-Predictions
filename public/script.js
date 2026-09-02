@@ -795,6 +795,8 @@ async function checkAdminAccess() {
     } catch (e) { isAdmin = false; }
     const btn = document.querySelector('.admin-toggle');
     if (btn) btn.style.display = isAdmin ? 'flex' : 'none';
+    const moreMenuAdmin = document.getElementById('moreMenuAdmin');
+    if (moreMenuAdmin) moreMenuAdmin.style.display = isAdmin ? 'block' : 'none';
 }
 
 function toggleAdminPanel() {
