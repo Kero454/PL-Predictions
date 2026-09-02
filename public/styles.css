@@ -1157,7 +1157,7 @@ body {
     border: none;
     cursor: pointer;
     z-index: 999;
-    display: flex;
+    display: none;
     align-items: center;
     justify-content: center;
 }

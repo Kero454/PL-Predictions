@@ -781,7 +781,24 @@ function updateLeaderboardDisplay(leaderboard) {
 }
 
 // Admin panel functions
+let isAdmin = false;
+
+async function checkAdminAccess() {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+        const res = await fetch('/api/admin/check', { headers: { 'Authorization': `Bearer ${token}` } });
+        if (res.ok) {
+            const data = await res.json();
+            isAdmin = data.isAdmin;
+        }
+    } catch (e) { isAdmin = false; }
+    const btn = document.querySelector('.admin-toggle');
+    if (btn) btn.style.display = isAdmin ? 'flex' : 'none';
+}
+
 function toggleAdminPanel() {
+    if (!isAdmin) return;
     const panel = document.getElementById('adminPanel');
     panel.classList.toggle('show');
     if (panel.classList.contains('show')) {
@@ -795,12 +812,14 @@ async function updateMatchResult(event) {
     const matchId = parseInt(document.getElementById('adminMatchId').value);
     const homeScore = parseInt(document.getElementById('adminHomeScore').value);
     const awayScore = parseInt(document.getElementById('adminAwayScore').value);
+    const token = localStorage.getItem('token');
     
     try {
         const response = await fetch('/api/admin/update-match', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify({ matchId, homeScore, awayScore })
         });
@@ -830,7 +849,8 @@ async function loadFirstGoalAdmin() {
     if (!container) return;
     container.innerHTML = '<div style="text-align:center;color:#999;padding:0.5rem;"><i class="fas fa-spinner fa-spin"></i></div>';
     try {
-        const res = await fetch('/api/admin/first-goals');
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/admin/first-goals', { headers: { 'Authorization': `Bearer ${token}` } });
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
         fgMatchesData = data.matches || [];
@@ -886,7 +906,8 @@ async function openFirstGoalEdit(matchId) {
 
     // Load player names for datalist
     try {
-        const res = await fetch(`/api/admin/first-goals/${matchId}/players`);
+        const token = localStorage.getItem('token');
+        const res = await fetch(`/api/admin/first-goals/${matchId}/players`, { headers: { 'Authorization': `Bearer ${token}` } });
         if (res.ok) {
             const data = await res.json();
             const dl = document.getElementById('fgPlayerList');
@@ -913,9 +934,10 @@ async function saveFirstGoal() {
     statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving & recalculating scores...';
     statusEl.style.color = '#999';
     try {
+        const token = localStorage.getItem('token');
         const res = await fetch('/api/admin/first-goals', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ matchId, firstTeam, firstScorer: firstScorer || null })
         });
         if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed'); }
@@ -936,9 +958,10 @@ async function clearFirstGoal() {
     statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing...';
     statusEl.style.color = '#999';
     try {
+        const token = localStorage.getItem('token');
         const res = await fetch('/api/admin/first-goals', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ matchId, firstTeam: null, firstScorer: null })
         });
         if (!res.ok) throw new Error('Failed');
@@ -3037,6 +3060,7 @@ const __prevShowMainApp = showMainApp;
 showMainApp = function() {
     __prevShowMainApp();
     loadProStatus();
+    checkAdminAccess();
     // Subscribe to push notifications after login (non-blocking)
     if (typeof subscribeToPushNotifications === 'function') {
         setTimeout(() => subscribeToPushNotifications(), 2000);

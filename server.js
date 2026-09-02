@@ -159,6 +159,21 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
+// Admin user IDs – only these users can access admin endpoints
+const ADMIN_USER_IDS = [1, 8]; // Kero=1, Sevo=8
+
+const adminOnly = (req, res, next) => {
+  if (!ADMIN_USER_IDS.includes(req.userId)) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
+
+// Check if the current user is an admin (used by frontend to show/hide admin UI)
+app.get('/api/admin/check', authenticateToken, (req, res) => {
+  res.json({ isAdmin: ADMIN_USER_IDS.includes(req.userId) });
+});
+
 // ===== API RESPONSE CACHE =====
 // Cache all matches in memory + disk; refresh every 3 minutes.
 // Disk persistence ensures match data survives restarts and API failures.
@@ -837,7 +852,7 @@ app.get('/api/cron/notifications', async (req, res) => {
 });
 
 // Admin endpoint to update match results (for testing)
-app.post('/api/admin/update-match', (req, res) => {
+app.post('/api/admin/update-match', authenticateToken, adminOnly, async (req, res) => {
   try {
     const { matchId, homeScore, awayScore } = req.body;
     updateMatchResults(parseInt(matchId), homeScore, awayScore);
@@ -849,7 +864,7 @@ app.post('/api/admin/update-match', (req, res) => {
 
 // Admin endpoint to set user scores manually
 // Calculates adjustment = desired_score - prediction_calculated_score
-app.post('/api/admin/set-scores', async (req, res) => {
+app.post('/api/admin/set-scores', authenticateToken, adminOnly, async (req, res) => {
   try {
     const { scores } = req.body; // [{ username, score }]
     if (!scores || !Array.isArray(scores)) return res.status(400).json({ error: 'scores array required' });
@@ -932,7 +947,7 @@ async function recalculateAllScores() {
 // first-scorer bonuses must be entered manually to score correctly.
 
 // List all finished matches with their current resolved data + any manual override
-app.get('/api/admin/first-goals', async (req, res) => {
+app.get('/api/admin/first-goals', authenticateToken, adminOnly, async (req, res) => {
   try {
     const allMatches = await fetchPremierLeagueMatches();
     const finished = allMatches.filter(m => m.status === 'finished');
@@ -964,7 +979,7 @@ app.get('/api/admin/first-goals', async (req, res) => {
 });
 
 // Get squad player names for the two teams of a match (for the scorer dropdown)
-app.get('/api/admin/first-goals/:matchId/players', async (req, res) => {
+app.get('/api/admin/first-goals/:matchId/players', authenticateToken, adminOnly, async (req, res) => {
   try {
     const matchId = parseInt(req.params.matchId);
     const allMatches = await fetchPremierLeagueMatches();
@@ -984,7 +999,7 @@ app.get('/api/admin/first-goals/:matchId/players', async (req, res) => {
 });
 
 // Save (or clear) a manual first-goal override for a match, then recalc scores
-app.post('/api/admin/first-goals', async (req, res) => {
+app.post('/api/admin/first-goals', authenticateToken, adminOnly, async (req, res) => {
   try {
     const { matchId, firstTeam, firstScorer } = req.body;
     if (!matchId) return res.status(400).json({ error: 'matchId required' });
