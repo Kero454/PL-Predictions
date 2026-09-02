@@ -895,35 +895,85 @@ function renderFirstGoalList() {
     container.innerHTML = html;
 }
 
+let fgHomePlayers = [];
+let fgAwayPlayers = [];
+let fgCurrentMatch = null;
+
 async function openFirstGoalEdit(matchId) {
     const m = fgMatchesData.find(x => x.matchId === matchId);
     if (!m) return;
+    fgCurrentMatch = m;
     document.getElementById('fgMatchId').value = matchId;
     document.getElementById('fgModalTitle').innerHTML = `<i class="fas fa-futbol"></i> ${m.homeTeam} ${m.homeScore}-${m.awayScore} ${m.awayTeam}`;
     document.getElementById('fgFirstTeam').value = m.effective.firstTeam || '';
-    document.getElementById('fgFirstScorer').value = m.effective.firstScorer || '';
     document.getElementById('fgStatus').textContent = '';
-    onFgTeamChange();
-    document.getElementById('firstGoalModal').style.display = 'block';
 
-    // Load player names for datalist
+    // Set team option labels to actual team names
+    const teamSelect = document.getElementById('fgFirstTeam');
+    teamSelect.options[1].textContent = m.homeTeam + ' (Home)';
+    teamSelect.options[2].textContent = m.awayTeam + ' (Away)';
+
+    // Load player names for dropdown
+    const scorerSelect = document.getElementById('fgFirstScorer');
+    scorerSelect.innerHTML = '<option value="" disabled selected>— Loading players —</option>';
+    fgHomePlayers = [];
+    fgAwayPlayers = [];
+
     try {
         const token = localStorage.getItem('token');
         const res = await fetch(`/api/admin/first-goals/${matchId}/players`, { headers: { 'Authorization': `Bearer ${token}` } });
         if (res.ok) {
             const data = await res.json();
-            const dl = document.getElementById('fgPlayerList');
-            dl.innerHTML = '';
-            const all = [...(data.homePlayers || []), ...(data.awayPlayers || [])].sort();
-            all.forEach(p => { const o = document.createElement('option'); o.value = p; dl.appendChild(o); });
+            fgHomePlayers = (data.homePlayers || []).sort();
+            fgAwayPlayers = (data.awayPlayers || []).sort();
         }
     } catch (e) { /* ignore */ }
+
+    populateFgScorerDropdown(m.effective.firstScorer || '');
+    onFgTeamChange();
+    document.getElementById('firstGoalModal').style.display = 'block';
+}
+
+function populateFgScorerDropdown(selectedValue) {
+    const sel = document.getElementById('fgFirstScorer');
+    const teamVal = document.getElementById('fgFirstTeam').value;
+    sel.innerHTML = '';
+
+    // Default option
+    const def = document.createElement('option');
+    def.value = '';
+    def.textContent = '— Select player —';
+    def.disabled = true;
+    if (!selectedValue) def.selected = true;
+    sel.appendChild(def);
+
+    let players = [];
+    if (teamVal === 'home') {
+        players = fgHomePlayers;
+    } else if (teamVal === 'away') {
+        players = fgAwayPlayers;
+    } else {
+        // Show all players grouped
+        players = [...fgHomePlayers, ...fgAwayPlayers].sort();
+    }
+
+    players.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p;
+        o.textContent = p;
+        if (p === selectedValue) o.selected = true;
+        sel.appendChild(o);
+    });
 }
 
 function onFgTeamChange() {
     const val = document.getElementById('fgFirstTeam').value;
     document.getElementById('fgScorerGroup').style.display = val === 'none' ? 'none' : 'block';
-    if (val === 'none') document.getElementById('fgFirstScorer').value = '';
+    if (val === 'none') {
+        document.getElementById('fgFirstScorer').value = '';
+    } else {
+        populateFgScorerDropdown(document.getElementById('fgFirstScorer').value);
+    }
 }
 
 async function saveFirstGoal() {
