@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS user_titles (
   title_key TEXT NOT NULL
 );
 
--- Seed existing score adjustments (from previous JSON file)
+-- Seed score adjustments: adjustment = desired_GW2_total - calculated_GW1_GW2
+-- Jona=56-21=35, Matha=54-36=18, Sevo=53-38=15, Kero=39-22=17, Luka=36-22=14
 INSERT INTO score_adjustments (user_id, adjustment) VALUES
-  (4, 37), (5, 12), (8, 12), (1, 10), (7, 9)
+  (4, 35), (5, 18), (8, 15), (1, 17), (7, 14)
 ON CONFLICT (user_id) DO UPDATE SET adjustment = EXCLUDED.adjustment;
