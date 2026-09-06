@@ -22,3 +22,8 @@ CREATE TABLE IF NOT EXISTS user_titles (
 INSERT INTO score_adjustments (user_id, adjustment) VALUES
   (4, 35), (5, 18), (8, 15), (1, 17), (7, 14)
 ON CONFLICT (user_id) DO UPDATE SET adjustment = EXCLUDED.adjustment;
+
+-- Seed user titles (from previous JSON file)
+INSERT INTO user_titles (user_id, title_key) VALUES
+  (1, 'league_creator'), (4, 'champion_2025_26'), (7, 'runner_up_2025_26')
+ON CONFLICT (user_id) DO UPDATE SET title_key = EXCLUDED.title_key;

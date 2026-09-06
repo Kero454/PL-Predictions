@@ -643,7 +643,14 @@ async function computeLeaderboard() {
   const [allUsers, allPredictions, allDoublers] = await Promise.all([
     db.getAllUsers(),
     db.getAllPredictions(),
-    db.getAllDoublers()
+    db.getAllDoublers(),
+    // Guarantee the DB-backed caches are populated before scoring. These are
+    // no-ops after the first load, but on a cold serverless instance they
+    // prevent scores from flip-flopping when overrides/adjustments aren't
+    // loaded yet.
+    db.loadAllOverrides(),
+    db.loadAllAdjustments(),
+    db.loadAllTitles()
   ]);
 
   // Build first-goal map using DB overrides
