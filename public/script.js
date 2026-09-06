@@ -846,6 +846,10 @@ async function updateMatchResult(event) {
 // ===== FIRST-GOAL ADMIN =====
 let fgMatchesData = [];
 
+function shortTeam(name) {
+    return (name || '').replace(/ FC$| AFC$/, '').replace(/^AFC /, '').trim();
+}
+
 async function loadFirstGoalAdmin() {
     const container = document.getElementById('firstGoalList');
     if (!container) return;
@@ -856,6 +860,23 @@ async function loadFirstGoalAdmin() {
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
         fgMatchesData = data.matches || [];
+
+        // Populate gameweek filter dropdown
+        const gwFilter = document.getElementById('fgGwFilter');
+        if (gwFilter) {
+            const prev = gwFilter.value;
+            const gws = [...new Set(fgMatchesData.map(m => m.gameweek))].sort((a, b) => a - b);
+            gwFilter.innerHTML = '<option value="all">All GWs</option><option value="missing">Missing only</option>';
+            gws.forEach(gw => {
+                const count = fgMatchesData.filter(m => m.gameweek === gw).length;
+                const missing = fgMatchesData.filter(m => m.gameweek === gw && m.effective.source === 'none').length;
+                const label = `GW${gw} (${missing ? missing + ' missing' : 'done'})`;
+                gwFilter.innerHTML += `<option value="${gw}">${label}</option>`;
+            });
+            gwFilter.value = prev || 'all';
+            if (!gwFilter.value) gwFilter.value = 'all';
+        }
+
         renderFirstGoalList();
     } catch (e) {
         container.innerHTML = '<div style="color:#f44;font-size:0.75rem;">Failed to load</div>';
@@ -868,28 +889,48 @@ function renderFirstGoalList() {
         container.innerHTML = '<div style="color:#999;font-size:0.75rem;">No finished matches yet.</div>';
         return;
     }
+
+    const filter = (document.getElementById('fgGwFilter') || {}).value || 'all';
+    let filtered = fgMatchesData;
+    if (filter === 'missing') {
+        filtered = fgMatchesData.filter(m => m.effective.source === 'none');
+    } else if (filter !== 'all') {
+        filtered = fgMatchesData.filter(m => m.gameweek === parseInt(filter));
+    }
+
+    if (!filtered.length) {
+        container.innerHTML = '<div style="color:#4caf50;font-size:0.75rem;text-align:center;padding:1rem;">All matches have data set!</div>';
+        return;
+    }
+
     let currentGW = 0;
     let html = '';
-    for (const m of fgMatchesData) {
+    for (const m of filtered) {
         if (m.gameweek !== currentGW) {
             currentGW = m.gameweek;
             html += `<div style="font-size:0.65rem;color:#667eea;font-weight:700;margin:0.5rem 0 0.25rem;border-bottom:1px solid rgba(255,255,255,0.06);padding-bottom:2px;">GW${currentGW}</div>`;
         }
         const eff = m.effective;
         const src = eff.source;
-        let statusIcon = '';
-        let statusColor = '';
-        if (src === 'override') { statusIcon = 'fas fa-pen'; statusColor = '#4caf50'; }
+        let statusIcon, statusColor;
+        if (src === 'override') { statusIcon = 'fas fa-check-circle'; statusColor = '#4caf50'; }
         else if (src === 'api') { statusIcon = 'fas fa-robot'; statusColor = '#667eea'; }
-        else { statusIcon = 'fas fa-exclamation-triangle'; statusColor = '#ff9800'; }
+        else { statusIcon = 'fas fa-exclamation-circle'; statusColor = '#ff9800'; }
 
-        const ftLabel = eff.firstTeam === 'home' ? m.homeTeam : eff.firstTeam === 'away' ? m.awayTeam : eff.firstTeam === 'none' ? '0-0' : '—';
-        const scorerLabel = eff.firstScorer || (eff.firstTeam === 'none' ? 'N/A' : '—');
+        const home = shortTeam(m.homeTeam);
+        const away = shortTeam(m.awayTeam);
+        const ftLabel = eff.firstTeam === 'home' ? home : eff.firstTeam === 'away' ? away : eff.firstTeam === 'none' ? '0-0' : '—';
+        const scorerLabel = eff.firstScorer || '';
+        const detailText = ftLabel !== '—' ? `${ftLabel}${scorerLabel ? ' · ' + scorerLabel : ''}` : 'Not set';
+        const detailColor = ftLabel !== '—' ? statusColor : '#666';
 
-        html += `<div class="fg-row" onclick="openFirstGoalEdit(${m.matchId})" style="cursor:pointer;display:flex;align-items:center;gap:0.4rem;padding:0.35rem 0.25rem;border-radius:6px;font-size:0.7rem;" onmouseenter="this.style.background='rgba(255,255,255,0.05)'" onmouseleave="this.style.background='none'">
-            <i class="${statusIcon}" style="color:${statusColor};font-size:0.6rem;width:14px;text-align:center;" title="${src}"></i>
-            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.homeTeam} ${m.homeScore}-${m.awayScore} ${m.awayTeam}</span>
-            <span style="color:${statusColor};font-size:0.6rem;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${ftLabel} / ${scorerLabel}">${ftLabel}</span>
+        html += `<div onclick="openFirstGoalEdit(${m.matchId})" style="cursor:pointer;display:flex;align-items:center;gap:0.35rem;padding:0.4rem 0.3rem;border-radius:8px;font-size:0.75rem;border-bottom:1px solid rgba(255,255,255,0.04);" onmouseenter="this.style.background='rgba(255,255,255,0.06)'" onmouseleave="this.style.background='none'">
+            <i class="${statusIcon}" style="color:${statusColor};font-size:0.7rem;flex-shrink:0;"></i>
+            <div style="flex:1;min-width:0;">
+                <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${home} ${m.homeScore}-${m.awayScore} ${away}</div>
+                <div style="font-size:0.6rem;color:${detailColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${detailText}</div>
+            </div>
+            <i class="fas fa-chevron-right" style="color:#444;font-size:0.55rem;flex-shrink:0;"></i>
         </div>`;
     }
     container.innerHTML = html;
@@ -904,14 +945,16 @@ async function openFirstGoalEdit(matchId) {
     if (!m) return;
     fgCurrentMatch = m;
     document.getElementById('fgMatchId').value = matchId;
-    document.getElementById('fgModalTitle').innerHTML = `<i class="fas fa-futbol"></i> ${m.homeTeam} ${m.homeScore}-${m.awayScore} ${m.awayTeam}`;
+    const home = shortTeam(m.homeTeam);
+    const away = shortTeam(m.awayTeam);
+    document.getElementById('fgModalTitle').innerHTML = `<i class="fas fa-futbol"></i> ${home} ${m.homeScore}-${m.awayScore} ${away}`;
     document.getElementById('fgFirstTeam').value = m.effective.firstTeam || '';
     document.getElementById('fgStatus').textContent = '';
 
     // Set team option labels to actual team names
     const teamSelect = document.getElementById('fgFirstTeam');
-    teamSelect.options[1].textContent = m.homeTeam + ' (Home)';
-    teamSelect.options[2].textContent = m.awayTeam + ' (Away)';
+    teamSelect.options[1].textContent = home + ' (Home)';
+    teamSelect.options[2].textContent = away + ' (Away)';
 
     // Load player names for dropdown
     const scorerSelect = document.getElementById('fgFirstScorer');

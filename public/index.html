@@ -614,32 +614,17 @@
         <div class="admin-section">
             <h5><i class="fas fa-futbol"></i> First Goal Data</h5>
             <p style="font-size:0.7rem;color:#999;margin:0 0 0.5rem;">Set first team to score &amp; first scorer for bonus points.</p>
-            <div id="firstGoalList" style="max-height:400px;overflow-y:auto;"></div>
-            <button class="btn btn-secondary" onclick="loadFirstGoalAdmin()" style="margin-top:0.5rem;width:100%;font-size:0.75rem;">
-                <i class="fas fa-sync-alt"></i> Refresh
-            </button>
-        </div>
-
-        <hr style="border-color:rgba(255,255,255,0.1);margin:1rem 0;">
-
-        <!-- Legacy match result update -->
-        <div class="admin-section">
-            <h5>Update Match Result</h5>
-            <form onsubmit="updateMatchResult(event)">
-                <div class="form-group">
-                    <label>Match ID:</label>
-                    <input type="number" id="adminMatchId" min="1" max="999999" required>
-                </div>
-                <div class="form-group">
-                    <label>Home Score:</label>
-                    <input type="number" id="adminHomeScore" min="0" max="20" required>
-                </div>
-                <div class="form-group">
-                    <label>Away Score:</label>
-                    <input type="number" id="adminAwayScore" min="0" max="20" required>
-                </div>
-                <button type="submit" class="btn btn-primary" style="width:100%;">Update Result</button>
-            </form>
+            <div style="display:flex;gap:0.4rem;align-items:center;margin-bottom:0.5rem;">
+                <label style="font-size:0.7rem;white-space:nowrap;">Gameweek:</label>
+                <select id="fgGwFilter" onchange="renderFirstGoalList()" style="flex:1;font-size:0.75rem;">
+                    <option value="all">All</option>
+                    <option value="missing">Missing only</option>
+                </select>
+                <button class="btn btn-secondary" onclick="loadFirstGoalAdmin()" style="font-size:0.65rem;padding:0.3rem 0.5rem;" title="Refresh">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+            <div id="firstGoalList" style="max-height:350px;overflow-y:auto;"></div>
         </div>
     </div>
 

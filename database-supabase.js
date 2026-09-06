@@ -148,6 +148,15 @@ const getUserDoubler = async (userId, gameweek) => {
   return data ? { matchId: data.match_id } : null;
 };
 
+// Batch-fetch ALL doublers (avoids N*M individual queries in leaderboard calc)
+const getAllDoublers = async () => {
+  const { data, error } = await supabase
+    .from('doublers')
+    .select('user_id, gameweek, match_id');
+  if (error) throw error;
+  return (data || []).map(d => ({ userId: d.user_id, gameweek: d.gameweek, matchId: d.match_id }));
+};
+
 // ===== LEADERBOARD =====
 
 const getAllUsers = async () => {
@@ -753,66 +762,128 @@ const deactivateSubscriptionByStripeId = async (stripeSubId) => {
 };
 
 // ===== SCORE ADJUSTMENT OPERATIONS =====
-// Stored in a local JSON file to avoid needing a DB column
-
-const fs = require('fs');
-const path = require('path');
-const ADJUSTMENTS_FILE = path.join(__dirname, 'score-adjustments.json');
+// Stored in Supabase table: score_adjustments (user_id int PK, adjustment int)
 
 let _adjustmentsCache = null;
-const loadAdjustments = () => {
+
+const loadAllAdjustments = async () => {
   if (_adjustmentsCache) return _adjustmentsCache;
   try {
-    if (fs.existsSync(ADJUSTMENTS_FILE)) {
-      _adjustmentsCache = JSON.parse(fs.readFileSync(ADJUSTMENTS_FILE, 'utf8'));
-    } else {
-      _adjustmentsCache = {};
-    }
-  } catch (e) {
+    const { data, error } = await supabase
+      .from('score_adjustments')
+      .select('user_id, adjustment');
+    if (error) throw error;
     _adjustmentsCache = {};
+    (data || []).forEach(r => { _adjustmentsCache[String(r.user_id)] = r.adjustment; });
+  } catch (e) {
+    console.error('[DB] Failed to load score adjustments:', e.message);
+    if (!_adjustmentsCache) _adjustmentsCache = {};
   }
   return _adjustmentsCache;
 };
 
 const setScoreAdjustment = async (userId, adjustment) => {
-  const adj = loadAdjustments();
-  adj[String(userId)] = adjustment;
-  _adjustmentsCache = adj;
-  fs.writeFileSync(ADJUSTMENTS_FILE, JSON.stringify(adj, null, 2));
+  const { error } = await supabase
+    .from('score_adjustments')
+    .upsert({ user_id: userId, adjustment }, { onConflict: 'user_id' });
+  if (error) console.error('[DB] setScoreAdjustment error:', error.message);
+  if (_adjustmentsCache) _adjustmentsCache[String(userId)] = adjustment;
 };
 
 const getScoreAdjustment = (userId) => {
-  const adj = loadAdjustments();
-  return adj[String(userId)] || 0;
+  if (!_adjustmentsCache) return 0;
+  return _adjustmentsCache[String(userId)] || 0;
 };
 
 // ===== USER TITLE OPERATIONS =====
-// Stored in local JSON file (no DB column needed)
+// Stored in Supabase table: user_titles (user_id int PK, title_key text)
 
-const TITLES_FILE = path.join(__dirname, 'user-titles.json');
+let _titlesCache = null;
 
-const loadTitles = () => {
+const loadAllTitles = async () => {
+  if (_titlesCache) return _titlesCache;
   try {
-    if (fs.existsSync(TITLES_FILE)) {
-      return JSON.parse(fs.readFileSync(TITLES_FILE, 'utf8'));
-    }
-  } catch (e) { /* ignore */ }
-  return {};
+    const { data, error } = await supabase
+      .from('user_titles')
+      .select('user_id, title_key');
+    if (error) throw error;
+    _titlesCache = {};
+    (data || []).forEach(r => { _titlesCache[String(r.user_id)] = r.title_key; });
+  } catch (e) {
+    console.error('[DB] Failed to load titles:', e.message);
+    if (!_titlesCache) _titlesCache = {};
+  }
+  return _titlesCache;
 };
 
 const setUserTitle = async (userId, titleKey) => {
-  const titles = loadTitles();
   if (titleKey) {
-    titles[String(userId)] = titleKey;
+    const { error } = await supabase
+      .from('user_titles')
+      .upsert({ user_id: userId, title_key: titleKey }, { onConflict: 'user_id' });
+    if (error) console.error('[DB] setUserTitle error:', error.message);
   } else {
-    delete titles[String(userId)];
+    await supabase.from('user_titles').delete().eq('user_id', userId);
   }
-  fs.writeFileSync(TITLES_FILE, JSON.stringify(titles, null, 2));
+  if (_titlesCache) {
+    if (titleKey) _titlesCache[String(userId)] = titleKey;
+    else delete _titlesCache[String(userId)];
+  }
 };
 
 const getUserTitle = async (userId) => {
-  const titles = loadTitles();
+  const titles = await loadAllTitles();
   return titles[String(userId)] || null;
+};
+
+// ===== FIRST GOAL OVERRIDES =====
+// Stored in Supabase table: first_goal_overrides (match_id text PK, first_team text, first_scorer text)
+
+let _overridesCache = null;
+
+const loadAllOverrides = async () => {
+  if (_overridesCache) return _overridesCache;
+  try {
+    const { data, error } = await supabase
+      .from('first_goal_overrides')
+      .select('match_id, first_team, first_scorer');
+    if (error) throw error;
+    _overridesCache = {};
+    (data || []).forEach(r => {
+      _overridesCache[r.match_id] = { firstTeam: r.first_team, firstScorer: r.first_scorer };
+    });
+    console.log(`[DB] Loaded ${Object.keys(_overridesCache).length} first-goal overrides`);
+  } catch (e) {
+    console.error('[DB] Failed to load overrides:', e.message);
+    if (!_overridesCache) _overridesCache = {};
+  }
+  return _overridesCache;
+};
+
+const setFirstGoalOverride = async (matchId, firstTeam, firstScorer) => {
+  const key = String(matchId);
+  if (firstTeam == null && firstScorer == null) {
+    await supabase.from('first_goal_overrides').delete().eq('match_id', key);
+    if (_overridesCache) delete _overridesCache[key];
+    return null;
+  }
+  const row = { match_id: key, first_team: firstTeam || null, first_scorer: firstTeam === 'none' ? null : (firstScorer || null) };
+  const { error } = await supabase
+    .from('first_goal_overrides')
+    .upsert(row, { onConflict: 'match_id' });
+  if (error) console.error('[DB] setFirstGoalOverride error:', error.message);
+  const val = { firstTeam: row.first_team, firstScorer: row.first_scorer };
+  if (_overridesCache) _overridesCache[key] = val;
+  return val;
+};
+
+const getFirstGoalOverride = (matchId) => {
+  if (!_overridesCache) return null;
+  return _overridesCache[String(matchId)] || null;
+};
+
+const getAllOverrides = () => {
+  return { ...(_overridesCache || {}) };
 };
 
 module.exports = {
@@ -882,7 +953,16 @@ module.exports = {
   // Score adjustments
   setScoreAdjustment,
   getScoreAdjustment,
+  loadAllAdjustments,
   // Titles
   setUserTitle,
-  getUserTitle
+  getUserTitle,
+  loadAllTitles,
+  // First-goal overrides
+  setFirstGoalOverride,
+  getFirstGoalOverride,
+  getAllOverrides,
+  loadAllOverrides,
+  // Batch queries
+  getAllDoublers
 };

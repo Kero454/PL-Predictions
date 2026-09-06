@@ -633,80 +633,89 @@ app.get('/api/verify', authenticateToken, async (req, res) => {
   }
 });
 
-// Get leaderboard
+// Leaderboard result cache – avoids recalculating on every request
+let leaderboardCache = { data: null, computedAt: 0 };
+const LEADERBOARD_TTL = 30 * 1000; // 30 seconds
+
+async function computeLeaderboard() {
+  const allMatches = await fetchPremierLeagueMatches();
+  const finishedMatches = allMatches.filter(m => m.status === 'finished');
+  const [allUsers, allPredictions, allDoublers] = await Promise.all([
+    db.getAllUsers(),
+    db.getAllPredictions(),
+    db.getAllDoublers()
+  ]);
+
+  // Build first-goal map using DB overrides
+  const firstGoalByMatch = await getFirstGoalMap(finishedMatches);
+  // Index doublers by "userId-gameweek" for O(1) lookup
+  const doublerIdx = {};
+  allDoublers.forEach(d => { doublerIdx[`${d.userId}-${d.gameweek}`] = d.matchId; });
+  // Index predictions by matchId for fast lookup
+  const predByUserMatch = {};
+  allPredictions.forEach(p => { predByUserMatch[`${p.userId}-${p.matchId}`] = p; });
+
+  const leaderboard = [];
+
+  for (const user of allUsers) {
+    let totalScore = 0;
+
+    for (const match of finishedMatches) {
+      const prediction = predByUserMatch[`${user.id}-${match.id}`];
+      if (!prediction) continue;
+
+      let matchScore = calculatePoints(
+        { homeScore: prediction.homeScore, awayScore: prediction.awayScore, isDoubler: false },
+        match.homeScore, match.awayScore
+      );
+
+      const doublerMatchId = doublerIdx[`${user.id}-${match.gameweek}`];
+      const isDoublerMatch = doublerMatchId != null && String(doublerMatchId) == String(match.id);
+      if (isDoublerMatch) matchScore *= 2;
+
+      const fg = firstGoalByMatch[match.id];
+      if (fg && fg.resolved) {
+        let bonus = 0;
+        bonus += goalEvents.scoreFirstTeam(prediction.firstTeamToScore, fg.firstTeam);
+        bonus += goalEvents.scoreFirstScorer(prediction.firstScorer, fg.firstScorer);
+        if (isDoublerMatch) bonus *= 2;
+        matchScore += bonus;
+      }
+
+      totalScore += matchScore;
+    }
+
+    const adjustment = db.getScoreAdjustment(user.id);
+    totalScore += adjustment;
+
+    await db.updateUserScore(user.id, totalScore);
+
+    const titleKey = await db.getUserTitle(user.id);
+    const titleBadge = titleKey && BADGES[titleKey] ? BADGES[titleKey] : null;
+
+    leaderboard.push({
+      id: user.id,
+      username: user.username,
+      score: totalScore,
+      predictions: allPredictions.filter(p => p.userId === user.id).length,
+      titleName: titleBadge ? titleBadge.name : null,
+      titleColor: titleBadge ? titleBadge.color : null
+    });
+  }
+
+  leaderboard.sort((a, b) => b.score - a.score);
+  return leaderboard;
+}
+
+// Get leaderboard (cached)
 app.get('/api/leaderboard', async (req, res) => {
   try {
-    // Calculate scores for all users
-    const allMatches = await fetchPremierLeagueMatches();
-    const finishedMatches = allMatches.filter(m => m.status === 'finished');
-    const allUsers = await db.getAllUsers();
-    const allPredictions = await db.getAllPredictions();
-    
-    // Resolve first-goal data (team + scorer) once per finished match via TheSportsDB.
-    // Results are cached in the goal-events module, so this is cheap on repeat calls.
-    const firstGoalByMatch = await getFirstGoalMap(finishedMatches);
-    
-    const leaderboard = [];
-    
-    // Ensure ALL users appear in leaderboard, even with 0 points
-    for (const user of allUsers) {
-      let totalScore = 0;
-      
-      for (const match of finishedMatches) {
-        const prediction = allPredictions.find(p => p.userId === user.id && p.matchId == match.id);
-        if (prediction) {
-          // Create a copy without isDoubler to avoid double-counting
-          // since we check doubler separately below
-          let matchScore = calculatePoints(
-            { homeScore: prediction.homeScore, awayScore: prediction.awayScore, isDoubler: false },
-            match.homeScore, match.awayScore
-          );
-          
-          // Check if this was a doubler match
-          const doubler = await db.getUserDoubler(user.id, match.gameweek);
-          const isDoublerMatch = doubler && doubler.matchId == match.id;
-          if (isDoublerMatch) {
-            matchScore *= 2;
-          }
-          
-          // Bonus predictions: first team to score (1pt) + first scorer (2pts).
-          // These are also doubled if this is the user's doubler match.
-          const fg = firstGoalByMatch[match.id];
-          if (fg && fg.resolved) {
-            let bonus = 0;
-            bonus += goalEvents.scoreFirstTeam(prediction.firstTeamToScore, fg.firstTeam);
-            bonus += goalEvents.scoreFirstScorer(prediction.firstScorer, fg.firstScorer);
-            if (isDoublerMatch) bonus *= 2;
-            matchScore += bonus;
-          }
-          
-          totalScore += matchScore;
-        }
-      }
-      
-      // Add score adjustment (manual corrections)
-      const adjustment = db.getScoreAdjustment(user.id);
-      totalScore += adjustment;
-
-      // Update user score in database
-      await db.updateUserScore(user.id, totalScore);
-      
-      // Get user title from file-based storage
-      const titleKey = await db.getUserTitle(user.id);
-      const titleBadge = titleKey && BADGES[titleKey] ? BADGES[titleKey] : null;
-
-      // Add user to leaderboard regardless of score
-      leaderboard.push({
-        id: user.id,
-        username: user.username,
-        score: totalScore,
-        predictions: allPredictions.filter(p => p.userId === user.id).length,
-        titleName: titleBadge ? titleBadge.name : null,
-        titleColor: titleBadge ? titleBadge.color : null
-      });
+    const now = Date.now();
+    if (leaderboardCache.data && (now - leaderboardCache.computedAt) < LEADERBOARD_TTL) {
+      return res.json(leaderboardCache.data);
     }
-    
-    leaderboard.sort((a, b) => b.score - a.score);
+    const leaderboard = await computeLeaderboard();
+    leaderboardCache = { data: leaderboard, computedAt: Date.now() };
     res.json(leaderboard);
   } catch (error) {
     console.error('Leaderboard error:', error);
@@ -871,21 +880,24 @@ app.post('/api/admin/set-scores', authenticateToken, adminOnly, async (req, res)
 
     const allMatches = await fetchPremierLeagueMatches();
     const finishedMatches = allMatches.filter(m => m.status === 'finished');
-    const allPredictions = await db.getAllPredictions();
+    const [allPredictions, allDoublers] = await Promise.all([
+      db.getAllPredictions(), db.getAllDoublers()
+    ]);
+    const doublerIdx = {};
+    allDoublers.forEach(d => { doublerIdx[`${d.userId}-${d.gameweek}`] = d.matchId; });
 
     const results = [];
     for (const { username, score: desiredScore } of scores) {
       const user = await db.getUserByUsername(username);
       if (!user) { results.push({ username, error: 'User not found' }); continue; }
 
-      // Calculate current prediction-based score
       let calcScore = 0;
       for (const match of finishedMatches) {
         const pred = allPredictions.find(p => p.userId === user.id && p.matchId == match.id);
         if (pred) {
           let ms = calculatePoints({ homeScore: pred.homeScore, awayScore: pred.awayScore, isDoubler: false }, match.homeScore, match.awayScore);
-          const doubler = await db.getUserDoubler(user.id, match.gameweek);
-          if (doubler && doubler.matchId == match.id) ms *= 2;
+          const dblMatchId = doublerIdx[`${user.id}-${match.gameweek}`];
+          if (dblMatchId != null && String(dblMatchId) == String(match.id)) ms *= 2;
           calcScore += ms;
         }
       }
@@ -903,42 +915,10 @@ app.post('/api/admin/set-scores', authenticateToken, adminOnly, async (req, res)
 });
 
 // ===== RECALCULATE ALL SCORES =====
-// Shared helper: mirrors the leaderboard scoring logic so we can trigger a
-// full recalc after admin changes (e.g. first-goal overrides) without the
-// user needing to open the leaderboard page.
+// Reuses computeLeaderboard and invalidates the cache so the next request gets fresh data.
 async function recalculateAllScores() {
-  const allMatches = await fetchPremierLeagueMatches();
-  const finishedMatches = allMatches.filter(m => m.status === 'finished');
-  const allUsers = await db.getAllUsers();
-  const allPredictions = await db.getAllPredictions();
-  const firstGoalByMatch = await getFirstGoalMap(finishedMatches);
-
-  for (const user of allUsers) {
-    let totalScore = 0;
-    for (const match of finishedMatches) {
-      const prediction = allPredictions.find(p => p.userId === user.id && p.matchId == match.id);
-      if (!prediction) continue;
-      let matchScore = calculatePoints(
-        { homeScore: prediction.homeScore, awayScore: prediction.awayScore, isDoubler: false },
-        match.homeScore, match.awayScore
-      );
-      const doubler = await db.getUserDoubler(user.id, match.gameweek);
-      const isDoublerMatch = doubler && doubler.matchId == match.id;
-      if (isDoublerMatch) matchScore *= 2;
-      const fg = firstGoalByMatch[match.id];
-      if (fg && fg.resolved) {
-        let bonus = 0;
-        bonus += goalEvents.scoreFirstTeam(prediction.firstTeamToScore, fg.firstTeam);
-        bonus += goalEvents.scoreFirstScorer(prediction.firstScorer, fg.firstScorer);
-        if (isDoublerMatch) bonus *= 2;
-        matchScore += bonus;
-      }
-      totalScore += matchScore;
-    }
-    const adjustment = db.getScoreAdjustment(user.id);
-    totalScore += adjustment;
-    await db.updateUserScore(user.id, totalScore);
-  }
+  await computeLeaderboard();
+  leaderboardCache = { data: null, computedAt: 0 }; // invalidate cache
   console.log('[Scoring] Recalculated all user scores');
 }
 
@@ -954,7 +934,7 @@ app.get('/api/admin/first-goals', authenticateToken, adminOnly, async (req, res)
     const firstGoalByMatch = await getFirstGoalMap(finished);
 
     const rows = finished.map(m => {
-      const override = goalEvents.getFirstGoalOverride(String(m.id));
+      const override = db.getFirstGoalOverride(String(m.id));
       const auto = firstGoalByMatch[m.id] || { firstTeam: null, firstScorer: null, resolved: false };
       const effective = override && override.firstTeam ? { ...override, source: 'override', resolved: true } : auto;
       return {
@@ -1007,7 +987,7 @@ app.post('/api/admin/first-goals', authenticateToken, adminOnly, async (req, res
     const ft = (firstTeam === 'home' || firstTeam === 'away' || firstTeam === 'none') ? firstTeam : null;
     if (firstTeam && !ft) return res.status(400).json({ error: "firstTeam must be 'home', 'away', or 'none'" });
     const scorer = ft === 'none' ? null : (typeof firstScorer === 'string' && firstScorer.trim() ? firstScorer.trim() : null);
-    const saved = goalEvents.setFirstGoalOverride(String(matchId), ft, scorer);
+    const saved = await db.setFirstGoalOverride(String(matchId), ft, scorer);
     // Recalculate everyone's score immediately so the leaderboard reflects the change
     await recalculateAllScores();
     res.json({ message: 'Saved', override: saved });
@@ -2100,17 +2080,22 @@ io.on('connection', (socket) => {
 });
 
 // Build a map of matchId -> { firstTeam, firstScorer, resolved } for finished
-// matches, using TheSportsDB via the goal-events module. Resolved results are
-// permanently cached inside the module, so repeat calls are cheap.
+// matches. DB overrides are checked first (instant). Only non-overridden matches
+// fall through to the goal-events module (TheSportsDB API, cached).
 const getFirstGoalMap = async (finishedMatches) => {
   const map = {};
   for (const match of finishedMatches) {
+    const key = String(match.id);
+    // Check DB override first (no API call)
+    const override = db.getFirstGoalOverride(key);
+    if (override && override.firstTeam) {
+      map[match.id] = { firstTeam: override.firstTeam, firstScorer: override.firstScorer || null, resolved: true, source: 'override' };
+      continue;
+    }
+    // Fall back to goal-events module (API + cache)
     try {
       map[match.id] = await goalEvents.getFirstGoal(
-        PL_SEASON_YEAR,
-        String(match.id),
-        match.homeTeam,
-        match.awayTeam
+        PL_SEASON_YEAR, key, match.homeTeam, match.awayTeam
       );
     } catch (e) {
       map[match.id] = { firstTeam: null, firstScorer: null, resolved: false };
@@ -2297,6 +2282,14 @@ async function initApp() {
       startNotificationScheduler();
     }
     
+    // Pre-load Supabase caches so leaderboard is fast from the first request
+    await Promise.all([
+      db.loadAllAdjustments(),
+      db.loadAllTitles(),
+      db.loadAllOverrides()
+    ]);
+    console.log('Supabase caches loaded (adjustments, titles, overrides)');
+
     // Generate H2H schedule if needed, then score any completed GWs
     await ensureH2HSchedule();
     processH2HMatches().catch(e => console.error('[H2H] Startup scoring error:', e.message));
