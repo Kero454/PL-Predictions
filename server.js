@@ -2087,25 +2087,18 @@ io.on('connection', (socket) => {
 });
 
 // Build a map of matchId -> { firstTeam, firstScorer, resolved } for finished
-// matches. DB overrides are checked first (instant). Only non-overridden matches
-// fall through to the goal-events module (TheSportsDB API, cached).
+// matches. ONLY admin-entered DB overrides count — the TheSportsDB API auto-fetch
+// is intentionally disabled so admins are the single source of truth for
+// first-team/first-scorer bonuses. Matches without an override are unresolved.
 const getFirstGoalMap = async (finishedMatches) => {
   const map = {};
   for (const match of finishedMatches) {
     const key = String(match.id);
-    // Check DB override first (no API call)
     const override = db.getFirstGoalOverride(key);
     if (override && override.firstTeam) {
       map[match.id] = { firstTeam: override.firstTeam, firstScorer: override.firstScorer || null, resolved: true, source: 'override' };
-      continue;
-    }
-    // Fall back to goal-events module (API + cache)
-    try {
-      map[match.id] = await goalEvents.getFirstGoal(
-        PL_SEASON_YEAR, key, match.homeTeam, match.awayTeam
-      );
-    } catch (e) {
-      map[match.id] = { firstTeam: null, firstScorer: null, resolved: false };
+    } else {
+      map[match.id] = { firstTeam: null, firstScorer: null, resolved: false, source: 'none' };
     }
   }
   return map;
