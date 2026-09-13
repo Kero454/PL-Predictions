@@ -764,10 +764,12 @@ const deactivateSubscriptionByStripeId = async (stripeSubId) => {
 // ===== SCORE ADJUSTMENT OPERATIONS =====
 // Stored in Supabase table: score_adjustments (user_id int PK, adjustment int)
 
+const DB_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
 let _adjustmentsCache = null;
+let _adjustmentsCacheAt = 0;
 
 const loadAllAdjustments = async () => {
-  if (_adjustmentsCache) return _adjustmentsCache;
+  if (_adjustmentsCache && (Date.now() - _adjustmentsCacheAt) < DB_CACHE_TTL) return _adjustmentsCache;
   try {
     const { data, error } = await supabase
       .from('score_adjustments')
@@ -775,6 +777,7 @@ const loadAllAdjustments = async () => {
     if (error) throw error;
     _adjustmentsCache = {};
     (data || []).forEach(r => { _adjustmentsCache[String(r.user_id)] = r.adjustment; });
+    _adjustmentsCacheAt = Date.now();
   } catch (e) {
     console.error('[DB] Failed to load score adjustments:', e.message);
     if (!_adjustmentsCache) _adjustmentsCache = {};
@@ -799,9 +802,10 @@ const getScoreAdjustment = (userId) => {
 // Stored in Supabase table: user_titles (user_id int PK, title_key text)
 
 let _titlesCache = null;
+let _titlesCacheAt = 0;
 
 const loadAllTitles = async () => {
-  if (_titlesCache) return _titlesCache;
+  if (_titlesCache && (Date.now() - _titlesCacheAt) < DB_CACHE_TTL) return _titlesCache;
   try {
     const { data, error } = await supabase
       .from('user_titles')
@@ -809,6 +813,7 @@ const loadAllTitles = async () => {
     if (error) throw error;
     _titlesCache = {};
     (data || []).forEach(r => { _titlesCache[String(r.user_id)] = r.title_key; });
+    _titlesCacheAt = Date.now();
   } catch (e) {
     console.error('[DB] Failed to load titles:', e.message);
     if (!_titlesCache) _titlesCache = {};
@@ -840,9 +845,10 @@ const getUserTitle = async (userId) => {
 // Stored in Supabase table: first_goal_overrides (match_id text PK, first_team text, first_scorer text)
 
 let _overridesCache = null;
+let _overridesCacheAt = 0;
 
 const loadAllOverrides = async () => {
-  if (_overridesCache) return _overridesCache;
+  if (_overridesCache && (Date.now() - _overridesCacheAt) < DB_CACHE_TTL) return _overridesCache;
   try {
     const { data, error } = await supabase
       .from('first_goal_overrides')
@@ -852,6 +858,7 @@ const loadAllOverrides = async () => {
     (data || []).forEach(r => {
       _overridesCache[r.match_id] = { firstTeam: r.first_team, firstScorer: r.first_scorer };
     });
+    _overridesCacheAt = Date.now();
     console.log(`[DB] Loaded ${Object.keys(_overridesCache).length} first-goal overrides`);
   } catch (e) {
     console.error('[DB] Failed to load overrides:', e.message);
