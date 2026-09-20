@@ -592,7 +592,7 @@ app.post('/api/predictions', authenticateToken, async (req, res) => {
     }
     
     // Validate required bonus predictions
-    const ftts = (firstTeamToScore === 'home' || firstTeamToScore === 'away' || firstTeamToScore === 'none' || firstTeamToScore === 'own_goal')
+    const ftts = (firstTeamToScore === 'home' || firstTeamToScore === 'away' || firstTeamToScore === 'none')
       ? firstTeamToScore : null;
     const scorer = (typeof firstScorer === 'string' && firstScorer.trim()) ? firstScorer.trim() : null;
     if (!ftts || !scorer) {
@@ -991,8 +991,8 @@ app.post('/api/admin/first-goals', authenticateToken, adminOnly, async (req, res
     const { matchId, firstTeam, firstScorer } = req.body;
     if (!matchId) return res.status(400).json({ error: 'matchId required' });
     // Validate firstTeam
-    const ft = (firstTeam === 'home' || firstTeam === 'away' || firstTeam === 'none' || firstTeam === 'own_goal') ? firstTeam : null;
-    if (firstTeam && !ft) return res.status(400).json({ error: "firstTeam must be 'home', 'away', 'own_goal', or 'none'" });
+    const ft = (firstTeam === 'home' || firstTeam === 'away' || firstTeam === 'none') ? firstTeam : null;
+    if (firstTeam && !ft) return res.status(400).json({ error: "firstTeam must be 'home', 'away', or 'none'" });
     const scorer = ft === 'none' ? null : (typeof firstScorer === 'string' && firstScorer.trim() ? firstScorer.trim() : null);
     const saved = await db.setFirstGoalOverride(String(matchId), ft, scorer);
     // Recalculate everyone's score immediately so the leaderboard reflects the change

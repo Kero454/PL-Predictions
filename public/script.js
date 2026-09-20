@@ -1021,9 +1021,6 @@ function onFgTeamChange() {
     document.getElementById('fgScorerGroup').style.display = val === 'none' ? 'none' : 'block';
     if (val === 'none') {
         document.getElementById('fgFirstScorer').value = '';
-    } else if (val === 'own_goal') {
-        // Auto-select "Own Goal" as scorer when team is set to Own Goal
-        populateFgScorerDropdown('Own Goal');
     } else {
         populateFgScorerDropdown(document.getElementById('fgFirstScorer').value);
     }
