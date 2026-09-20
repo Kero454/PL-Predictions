@@ -1007,6 +1007,13 @@ function populateFgScorerDropdown(selectedValue) {
         if (p === selectedValue) o.selected = true;
         sel.appendChild(o);
     });
+
+    // Add "Own Goal" option
+    const ogOpt = document.createElement('option');
+    ogOpt.value = 'Own Goal';
+    ogOpt.textContent = '⚽ Own Goal';
+    if ('Own Goal' === selectedValue) ogOpt.selected = true;
+    sel.appendChild(ogOpt);
 }
 
 function onFgTeamChange() {
@@ -1014,6 +1021,9 @@ function onFgTeamChange() {
     document.getElementById('fgScorerGroup').style.display = val === 'none' ? 'none' : 'block';
     if (val === 'none') {
         document.getElementById('fgFirstScorer').value = '';
+    } else if (val === 'own_goal') {
+        // Auto-select "Own Goal" as scorer when team is set to Own Goal
+        populateFgScorerDropdown('Own Goal');
     } else {
         populateFgScorerDropdown(document.getElementById('fgFirstScorer').value);
     }
@@ -1309,6 +1319,11 @@ function openPredictionModal(matchId, homeTeam, awayTeam, matchDate, gameweek) {
           });
           scorerSelect.appendChild(homeGroup);
           scorerSelect.appendChild(awayGroup);
+          // Add "Own Goal" option
+          const ownGoalOpt = document.createElement('option');
+          ownGoalOpt.value = 'Own Goal';
+          ownGoalOpt.textContent = '⚽ Own Goal';
+          scorerSelect.appendChild(ownGoalOpt);
           // Add "No goals" option at the end
           const noGoalOpt = document.createElement('option');
           noGoalOpt.value = 'no_goal';
